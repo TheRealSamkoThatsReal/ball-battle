@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ball Roguelike — Weaponized</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: radial-gradient(1200px 800px at 50% -10%, #1a2138, #0b0e17);
+    color: #e8ecf5;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #wrap { height: 100%; display: grid; grid-template-columns: 1fr 300px; gap: 16px; padding: 16px; }
+  #stage { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; }
+  canvas { background: transparent; max-width: 100%; max-height: 100%; }
+  #panel { background: #131826; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); overflow-y: auto; }
+  h1 { font-size: 18px; margin: 0; }
+  .sub { font-size: 12px; color: #8b95ad; }
+  .stat-row { display: flex; justify-content: space-between; font-size: 13px; color: #c3cbdd; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .stat-row b { color: #fff; }
+  button { background: linear-gradient(180deg, #5b8cff, #3f6fe0); color: white; border: 0; border-radius: 10px; padding: 12px 14px; font-size: 15px; font-weight: 700; cursor: pointer; transition: transform .05s, filter .15s; }
+  button:hover { filter: brightness(1.08); } button:active { transform: translateY(1px); }
+  button.ghost { background: #1b2236; color: #cfd6e6; font-weight: 600; }
+  .wlist { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wchip { background: #0e1320; border: 1px solid #232c42; border-radius: 8px; padding: 4px 8px; font-size: 12px; display:flex; gap:5px; align-items:center; }
+  .hpbar-lg { height: 10px; background:#232c42; border-radius: 6px; overflow: hidden; }
+  .hpbar-lg > div { height: 100%; background: linear-gradient(90deg,#57e08a,#37c46a); transition: width .1s; }
+
+  /* overlays */
+  .overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 20px; background: rgba(8,10,18,.82); border-radius: 16px; backdrop-filter: blur(3px); text-align: center; padding: 24px; }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: 34px; margin: 0; }
+  .overlay p { color: #9aa4bc; margin: 0; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .card { width: 180px; background: #141a2b; border: 1px solid #263049; border-radius: 14px; padding: 18px; cursor: pointer; transition: transform .1s, border-color .1s, box-shadow .1s; text-align: center; }
+  .card:hover { transform: translateY(-4px); border-color: #5b8cff; box-shadow: 0 12px 30px rgba(91,140,255,.25); }
+  .card .icon { font-size: 40px; }
+  .card .cname { font-size: 17px; font-weight: 700; margin: 8px 0 4px; }
+  .card .cdesc { font-size: 12px; color: #9aa4bc; line-height: 1.45; }
+  .card.small { width: 150px; padding: 14px; }
+  .wchip.syn { background: rgba(91,224,138,.12); border-color: #2f5f43; color: #9be0b0; cursor: help; }
+  .card { position: relative; }
+  .card .price { margin-top: 10px; font-weight: 800; color: #ffd24a; font-size: 15px; }
+  .card.sold { opacity: .4; cursor: default; }
+  .card.sold:hover { transform: none; border-color: #263049; box-shadow: none; }
+  .card.tooexp { opacity: .55; cursor: not-allowed; }
+  .card .banish { position: absolute; top: 6px; right: 8px; font-size: 13px; color: #6b7690; cursor: pointer; opacity: .6; }
+  .card .banish:hover { opacity: 1; color: #ff6b6b; }
+  .card .tag { display:inline-block; font-size: 10px; letter-spacing: .5px; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; margin-top: 10px; }
+  .tag.weapon { background: rgba(255,180,60,.15); color: #ffce6b; }
+  .tag.stat { background: rgba(91,140,255,.15); color: #8fb0ff; }
+  .hint { font-size: 11px; color: #6b7690; line-height: 1.5; }
+  @media (max-width: 760px) { #wrap { grid-template-columns: 1fr; grid-template-rows: 1fr auto; } #panel { max-height: 38vh; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="c" width="720" height="720"></canvas>
+
+    <div id="startOverlay" class="overlay show">
+      <h2>⚔️ Ball Roguelike</h2>
+      <p>Choose your class. Your ball fights on its own — you build it.</p>
+      <div class="cards" id="classCards"></div>
+      <div class="hint" style="max-width:400px">Weapons orbit your ball and strike as you spin. Combine the right weapons and stats to trigger <b>synergies</b>. Survive <b>boss rounds</b> every 5th floor.</div>
+      <div id="records" class="hint" style="color:#ffce6b"></div>
+    </div>
+
+    <div id="shopOverlay" class="overlay">
+      <h2>🏪 Shop</h2>
+      <p>Round <b id="shopRound"></b> cleared &nbsp;·&nbsp; <span style="color:#ffd24a">💰 <b id="shopGold">0</b> gold</span></p>
+      <div class="cards" id="shopCards"></div>
+      <div style="display:flex; gap:12px; align-items:center">
+        <button id="rerollBtn" class="ghost">🎲 Reroll (<span id="rerollCost">3</span>💰)</button>
+        <button id="continueBtn">➡ Next Round</button>
+      </div>
+      <div class="hint">Click a card to buy it (if you can afford it). 🚫 banishes it from the rest of your run.</div>
+    </div>
+
+    <div id="deadOverlay" class="overlay">
+      <h2 id="deadTitle">☠️ Defeated</h2>
+      <p id="deadText"></p>
+      <button id="restartBtn">↻ New Run</button>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div><h1>🩸 Your Build</h1><div class="sub"><b id="className">—</b> · Round <b id="roundNum">—</b> · <span style="color:#ffd24a">💰 <b id="sGold">0</b></span></div></div>
+    <div>
+      <div class="stat-row"><span>Health</span><b id="hpText">—</b></div>
+      <div class="hpbar-lg"><div id="hpFill" style="width:100%"></div></div>
+    </div>
+    <div>
+      <div class="stat-row"><span>❤️ Max HP</span><b id="sMaxHp">—</b></div>
+      <div class="stat-row"><span>🗡️ Damage</span><b id="sDmg">—</b></div>
+      <div class="stat-row"><span>🌀 Spin</span><b id="sSpin">—</b></div>
+      <div class="stat-row"><span>💨 Speed</span><b id="sSpeed">—</b></div>
+      <div class="stat-row"><span>🛡️ Armor</span><b id="sArmor">—</b></div>
+      <div class="stat-row"><span>🧛 Lifesteal</span><b id="sLifesteal">—</b></div>
+      <div class="stat-row"><span>🌵 Thorns</span><b id="sThorns">—</b></div>
+      <div class="stat-row"><span>🤺 Parry</span><b id="sParry">—</b></div>
+    </div>
+    <div>
+      <div class="sub" style="margin-bottom:6px">Weapons</div>
+      <div class="wlist" id="wlist"><span class="sub">none yet</span></div>
+    </div>
+    <div>
+      <div class="sub" style="margin-bottom:6px">Synergies <span style="opacity:.6">(hover for effect)</span></div>
+      <div class="wlist" id="synergies"><span class="sub">none active</span></div>
+    </div>
+    <div style="margin-top:auto; display:flex; gap:8px; flex-wrap:wrap">
+      <button id="soundBtn" class="ghost" style="flex:1">🔊 Sound: On</button>
+      <button id="controlBtn" class="ghost" style="flex:1">🕹️ Control: Off</button>
+    </div>
+    <div class="hint">Free-for-all — enemies hurt each other too. Clear the arena to survive the round.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2;
+  const ARENA_R = Math.min(W,H)/2 - 12;
+  const BODY_DMG = 1;   // damage every ball deals on body-slam, weapons or not
+  const rand = (a,b) => a + Math.random()*(b-a);
+  const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+  // ---------- audio ----------
+  let ac = null, soundOn = true;
+  function beep(freq, dur=0.06, type="sine", gain=0.12) {
+    if (!soundOn) return;
+    if (!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.value = gain;
+    o.connect(g); g.connect(ac.destination);
+    const t = ac.currentTime;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.start(t); o.stop(t+dur);
+  }
+  // loud, bright, metallic parry "TING" — inharmonic partials + long ring
+  function ting() {
+    if (!soundOn) return;
+    if (!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+    const t = ac.currentTime, base = 3200 + Math.random()*400;
+    [1, 1.5, 2.13, 2.9].forEach((mult, i) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "triangle"; o.frequency.value = base*mult;
+      const gain = 0.34 / (i+1);
+      g.gain.setValueAtTime(gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t); o.stop(t + 0.4);
+    });
+  }
+
+  // ---------- weapon catalog ----------
+  // len: reach past shell, hitR: hit radius, dmg per strike, cd: frames between hits on same target
+  const WEAPONS = {
+    sword:  { name:"Sword",  icon:"🗡️", len:38, hitR:7,  dmg:5, cd:20, color:"#d9e2f0", desc:"Balanced blade. Solid reach and damage." },
+    dagger: { name:"Dagger", icon:"🔪", len:20, hitR:6,  dmg:3, cd:12, color:"#cfd8e6", desc:"Short but fast — low cooldown." },
+    spike:  { name:"Spike",  icon:"📌", len:15, hitR:6,  dmg:3, cd:16, color:"#b8c0d0", desc:"Cheap, close-range poke." },
+    hammer: { name:"Hammer", icon:"🔨", len:28, hitR:14, dmg:9, cd:32, color:"#c9a26b", desc:"Heavy hits with big knockback." },
+    saw:    { name:"Saw",    icon:"🪚", len:22, hitR:13, dmg:3, cd:7,  color:"#9fb0c4", desc:"Grinds fast — very low cooldown." },
+    flail:  { name:"Flail",  icon:"⛓️", len:82, hitR:11, dmg:6, cd:24, color:"#a8a8b6", desc:"Very long swinging reach." },
+    lance:  { name:"Lance",  icon:"🏹", len:58, hitR:6,  dmg:6, cd:26, color:"#e0d7b8", desc:"Very long reach, strikes first." },
+    torch:  { name:"Torch",  icon:"🔥", len:30, hitR:8,  dmg:3, cd:22, color:"#ff7a2b", desc:"Sets enemies ablaze — burn damage over time.", applies:"burn" },
+    frost:  { name:"Frostbite", icon:"❄️", len:30, hitR:8, dmg:3, cd:22, color:"#7fdfff", desc:"Chills enemies, slowing their spin & speed.", applies:"frost" },
+  };
+  const STATUS_DUR = { burn:120, frost:90 };
+
+  // ---------- weapon evolutions (reach EVOLVE_LEVEL to transform) ----------
+  const EVOLVE_LEVEL = 4;
+  const EVOLUTIONS = {
+    sword:  { name:"Greatsword",    icon:"⚔️", color:"#eaf1ff", dmgMult:1.5, sizeMult:1.30 },
+    dagger: { name:"Twin Fangs",    icon:"🗡️", color:"#e6eefc", dmgMult:1.4, sizeMult:1.25, cd:8 },
+    spike:  { name:"Spike Crown",   icon:"👑", color:"#e0e6f0", dmgMult:1.5, sizeMult:1.40 },
+    hammer: { name:"Warhammer",     icon:"🛠️", color:"#e0b877", dmgMult:1.5, sizeMult:1.30 },
+    saw:    { name:"Buzzsaw",       icon:"⚙️", color:"#cfe0f4", dmgMult:1.4, sizeMult:1.40, cd:4 },
+    flail:  { name:"Wrecking Ball", icon:"🪩", color:"#cfcfe0", dmgMult:1.6, sizeMult:1.30 },
+    lance:  { name:"Pike",          icon:"🔱", color:"#f0e8c8", dmgMult:1.5, sizeMult:1.35 },
+    torch:  { name:"Inferno",       icon:"🌋", color:"#ff5a1a", dmgMult:1.5, sizeMult:1.35 },
+    frost:  { name:"Blizzard",      icon:"🌨️", color:"#aeeaff", dmgMult:1.5, sizeMult:1.35 },
+  };
+  const evo = w => (w.evolved ? EVOLUTIONS[w.key] : null);
+
+  // per-level scaling for stacked weapons — bigger each level, transformed once evolved
+  const wLen  = w => WEAPONS[w.key].len  * (1 + (w.level-1)*0.35) * (evo(w)?evo(w).sizeMult:1);
+  const wHitR = w => WEAPONS[w.key].hitR * (1 + (w.level-1)*0.30) * (evo(w)?evo(w).sizeMult:1);
+  const wDmg  = w => WEAPONS[w.key].dmg  * (1 + (w.level-1)*0.30) * (evo(w)?evo(w).dmgMult:1);
+  const wCd   = w => (evo(w) && evo(w).cd) ? evo(w).cd : WEAPONS[w.key].cd;
+  const wColor= w => evo(w) ? evo(w).color : WEAPONS[w.key].color;
+  const wName = w => evo(w) ? evo(w).name  : WEAPONS[w.key].name;
+  const wIcon = w => evo(w) ? evo(w).icon  : WEAPONS[w.key].icon;
+
+  // ---------- reward pool ----------
+  const REWARDS = [
+    ...Object.keys(WEAPONS).map(k => ({
+      type:"weapon", icon:WEAPONS[k].icon, name:WEAPONS[k].name, desc:WEAPONS[k].desc,
+      apply: p => p.addWeapon(k)
+    })),
+    { type:"stat", icon:"❤️", name:"Vitality", desc:"+8 Max HP and full heal.", apply:p=>{p.maxHp+=8; p.hp=p.maxHp;} },
+    { type:"stat", icon:"🌀", name:"Rage", desc:"+40% spin speed. Weapons sweep faster.", apply:p=>{p.spinSpeed*=1.4;} },
+    { type:"stat", icon:"💨", name:"Momentum", desc:"+18% move speed.", apply:p=>{p.baseSpeed*=1.18;} },
+    { type:"stat", icon:"🛡️", name:"Armor", desc:"-1 damage taken from every hit.", apply:p=>{p.armor+=1;} },
+    { type:"stat", icon:"🧛", name:"Lifesteal", desc:"Heal 20% of damage you deal.", apply:p=>{p.lifesteal+=0.20;} },
+    { type:"stat", icon:"🌵", name:"Thorns", desc:"+3 damage to anything that body-slams you.", apply:p=>{p.thorns+=3;} },
+    { type:"stat", icon:"🗡️", name:"Sharpen", desc:"+30% weapon damage.", apply:p=>{p.dmgMult*=1.3;} },
+    { type:"stat", icon:"🤺", name:"Parry", desc:"+18% chance to deflect an incoming weapon hit.", apply:p=>{p.parry+=0.18;} },
+  ];
+
+  // ---------- classes (chosen at run start) ----------
+  const CLASSES = [
+    { id:"knight", name:"Knight", icon:"🛡️", desc:"Sturdy all-rounder. Sword, +8 HP, armor & parry.",
+      apply:p=>{ p.addWeapon("sword"); p.maxHp+=8; p.armor+=1; p.parry+=0.15; } },
+    { id:"berserker", name:"Berserker", icon:"🩸", desc:"Twin daggers & lifesteal, but fragile.",
+      apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=4; } },
+    { id:"juggernaut", name:"Juggernaut", icon:"🔨", desc:"Hammer bruiser. Big & tanky, slow spin.",
+      apply:p=>{ p.addWeapon("hammer"); p.maxHp+=14; p.thorns+=2; p.spinSpeed*=0.7; p.r+=4; } },
+    { id:"whirlwind", name:"Whirlwind", icon:"🌀", desc:"Twin spikes, blazing spin, small & quick.",
+      apply:p=>{ p.addWeapon("spike"); p.addWeapon("spike"); p.spinSpeed*=1.6; p.baseSpeed*=1.1; p.r-=3; } },
+    { id:"lancer", name:"Lancer", icon:"🏹", desc:"Long lance & extra speed. Strike first.",
+      apply:p=>{ p.addWeapon("lance"); p.baseSpeed*=1.2; p.dmgMult*=1.1; } },
+  ];
+
+  // ---------- synergies (evaluated live from your build) ----------
+  const SYNERGIES = [
+    { id:"whirlwind", name:"Whirlwind", icon:"🌀", desc:"3+ weapons: spin 30% faster & hit 15% harder.",
+      test:p=>p.weapons.length>=3, mod:(p,b)=>{ b.spinMult*=1.3; b.dmgMult*=1.15; } },
+    { id:"vampire", name:"Vampire Fangs", icon:"🧛", desc:"Lifesteal + a fast blade (Saw/Dagger): +15% lifesteal.",
+      test:p=>p.lifesteal>0 && p.weapons.some(w=>w.key==="saw"||w.key==="dagger"), mod:(p,b)=>{ b.lifesteal+=0.15; } },
+    { id:"bramble", name:"Bramble", icon:"🌵", desc:"Thorns + Armor: +3 thorns and +1 armor.",
+      test:p=>p.thorns>0 && p.armor>0, mod:(p,b)=>{ b.thorns+=3; b.armor+=1; } },
+    { id:"executioner", name:"Executioner", icon:"💥", desc:"Hammer + Sharpen: double knockback, +20% damage.",
+      test:p=>p.weapons.some(w=>w.key==="hammer") && p.dmgMult>1.05, mod:(p,b)=>{ b.knockMult*=2; b.dmgMult*=1.2; } },
+    { id:"duelist", name:"Duelist", icon:"⚔️", desc:"Exactly 1 weapon: master it for +50% damage.",
+      test:p=>p.weapons.length===1, mod:(p,b)=>{ b.dmgMult*=1.5; } },
+    { id:"arsenal", name:"Arsenal", icon:"🎖️", desc:"4+ different weapon types: +25% damage.",
+      test:p=>new Set(p.weapons.map(w=>w.key)).size>=4, mod:(p,b)=>{ b.dmgMult*=1.25; } },
+    { id:"berserk", name:"Berserk", icon:"🔥", desc:"Below 40% HP: +40% spin & +30% damage.",
+      test:p=>p.hp>0 && p.hp < p.maxHp*0.4, mod:(p,b)=>{ b.spinMult*=1.4; b.dmgMult*=1.3; } },
+    { id:"flywheel", name:"Flywheel", icon:"💨", desc:"Speed 10+: raw momentum adds +25% damage.",
+      test:p=>p.speed>=10, mod:(p,b)=>{ b.dmgMult*=1.25; } },
+    { id:"riposte", name:"Riposte", icon:"🤺", desc:"Parry + a blade: deflected hits strike back for damage.",
+      test:p=>p.parry>0 && p.weapons.some(w=>w.key==="sword"||w.key==="dagger"||w.key==="lance"),
+      mod:(p,b)=>{ b.riposteDmg = 5; } },
+  ];
+
+  const NEUTRAL_BONUS = () => ({ dmgMult:1, armor:0, lifesteal:0, thorns:0, spinMult:1, speedMult:1, knockMult:1, parry:0, riposteDmg:0 });
+  function computeBonus(p) {
+    const b = NEUTRAL_BONUS(), active = [];
+    for (const s of SYNERGIES) if (s.test(p)) { active.push(s); s.mod(p, b); }
+    p.bonus = b; p.activeSynergies = active;
+  }
+  // effective (base stat + synergy bonus)
+  const effDmg    = b => b.dmgMult   * b.bonus.dmgMult;
+  const effArmor  = b => b.armor     + b.bonus.armor;
+  const effLife   = b => b.lifesteal + b.bonus.lifesteal;
+  const effThorns = b => b.thorns    + b.bonus.thorns;
+  const effParry  = b => Math.min(0.75, b.parry + b.bonus.parry);   // capped so nothing is untouchable
+
+  // ---------- enemy affixes (random modifiers) ----------
+  const AFFIXES = [
+    { id:"armored",   name:"Armored",   color:"#8fa0c0", apply:e=>{ e.armor += 2; } },
+    { id:"hasted",    name:"Hasted",    color:"#7be0b0", apply:e=>{ e.baseSpeed *= 1.35; e.spinSpeed *= 1.3; } },
+    { id:"regen",     name:"Regen",     color:"#7be05b", apply:e=>{ e.regen = true; } },
+    { id:"explosive", name:"Explosive", color:"#ff7a2b", apply:e=>{ e.explosive = true; } },
+  ];
+
+  // ---------- ball ----------
+  let idc = 0;
+  class Ball {
+    constructor(opts) {
+      this.id = idc++;
+      this.isPlayer = !!opts.isPlayer;
+      this.name = opts.name || "Enemy";
+      this.color = opts.color || "#ff5a5a";
+      this.r = opts.r || 24;
+      this.maxHp = opts.maxHp || 20;
+      this.hp = this.maxHp;
+      this.baseSpeed = opts.speed || 3;   // cruising speed (persists; set by class/Momentum)
+      this.speed = this.baseSpeed;         // current speed (ramps on wall hits, resets each round)
+      this.spin = rand(0, Math.PI*2);
+      this.spinSpeed = opts.spinSpeed || 0.035;
+      this.weapons = [];               // { key, angleOffset, cd:{targetId:frames} }
+      this.armor = 0; this.lifesteal = 0; this.thorns = 0; this.dmgMult = 1; this.parry = 0;
+      this.clashCd = {};     // per-target cooldown for weapon-on-weapon clashes
+      this.parryFlash = 0;   // brief visual ring when a parry lands
+      this.className = "";
+      this.bonus = NEUTRAL_BONUS();      // combat modifiers from active synergies
+      this.activeSynergies = [];
+      this.hitFlash = 0;
+      this.contactCd = {};   // per-target cooldown for body-slam damage
+      this.status = { burn:0, frost:0 };
+      this.type = opts.type || "normal";   // normal | charger | splitter
+      this.isBoss = false;
+      this.split = !!opts.split;           // a mini from a splitter (won't split again)
+      this.isElite = false; this.affix = null; this.affixColor = null;
+      this.regen = false; this.explosive = false;
+      this.dashFrames = 0; this.dashCd = 0;   // player control: dash
+      const ang = rand(0, Math.PI*2), dist = rand(0, ARENA_R*0.55);
+      this.x = opts.x ?? CX + Math.cos(ang)*dist;
+      this.y = opts.y ?? CY + Math.sin(ang)*dist;
+      const dir = rand(0, Math.PI*2);
+      this.vx = Math.cos(dir)*this.speed; this.vy = Math.sin(dir)*this.speed;
+      this.dead = false;
+      (opts.weapons||[]).forEach(k => this.addWeapon(k));
+    }
+    addWeapon(key) {
+      const existing = this.weapons.find(w => w.key === key);
+      if (existing) {
+        existing.level++;                            // stacking a type levels it up
+        if (!existing.evolved && existing.level >= EVOLVE_LEVEL) {
+          existing.evolved = true;
+          if (this.isPlayer)
+            killFeed.unshift({ text:`✦ ${WEAPONS[key].name} → ${EVOLUTIONS[key].name}!`, life:2 });
+        }
+        return;
+      }
+      this.weapons.push({ key, angleOffset:0, cd:{}, level:1, evolved:false });
+      const n = this.weapons.length;
+      this.weapons.forEach((w,i) => w.angleOffset = i * Math.PI*2 / n);
+    }
+  }
+
+  // ---------- world state ----------
+  let balls = [], particles = [], floats = [], killFeed = [], spawnQueue = [];
+  let shake = 0, hitstop = 0, arenaR = ARENA_R, roundFrame = 0, runKills = 0;
+  let state = "menu";   // menu | fighting | shop | dead
+  let round = 0, player = null, gold = 0;
+  // shop
+  let shopItems = [], banished = new Set(), rerollCost = 3;
+  // optional player control
+  let controlOn = false, mouseX = CX, mouseY = CY;
+
+  const el = id => document.getElementById(id);
+  const ui = {
+    start: el('startOverlay'), shop: el('shopOverlay'), dead: el('deadOverlay'),
+    deadText: el('deadText'), deadTitle: el('deadTitle'),
+  };
+
+  function spawnParticles(x,y,color,n=10,spd=5) {
+    for (let k=0;k<n;k++){ const a=rand(0,Math.PI*2), s=rand(1,spd);
+      particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,color}); }
+  }
+  function floatText(x,y,text,color) {
+    floats.push({ x, y, text, color, life:1, vy:-0.9 });
+  }
+  function floatDmg(x,y,amount,color) {
+    floatText(x+rand(-6,6), y, Math.round(amount), color);
+  }
+  function addKill(b) {
+    killFeed.unshift({ text: b.isPlayer ? "YOU were destroyed" : `${b.name} destroyed`, life: 1 });
+    if (killFeed.length > 4) killFeed.pop();
+  }
+  function goldFor(b) {
+    if (b.split) return 1;
+    let g = 2 + Math.floor(round/2);
+    if (b.isElite) g += 8;
+    if (b.isBoss) g += 25;
+    return g;
+  }
+  // one place for death: particles, feed, hitstop, gold, splitter/explosive
+  function killBall(b) {
+    if (b.dead) return;
+    b.dead = true;
+    spawnParticles(b.x, b.y, b.color, 40, 8);
+    shake = Math.min(shake+16, 24);
+    hitstop = Math.max(hitstop, b.isBoss ? 10 : 4);
+    beep(b.isBoss?70:110, b.isBoss?0.5:0.3, "sawtooth", 0.18);
+    addKill(b);
+    if (!b.isPlayer) {
+      runKills++;
+      const g = goldFor(b); gold += g;
+      floatText(b.x, b.y - b.r - 4, "+"+g+"💰", "#ffd24a");
+    }
+    if (b.explosive) {   // affix: damage everything nearby on death
+      spawnParticles(b.x, b.y, "#ff7a2b", 30, 10);
+      shake = Math.min(shake+8, 24);
+      for (const o of balls) {
+        if (o === b || o.dead) continue;
+        const dx=o.x-b.x, dy=o.y-b.y, dd=Math.hypot(dx,dy)||1;
+        if (dd < b.r + o.r + 45) {
+          const real = Math.max(1, 6 - effArmor(o));
+          o.hp -= real; o.hitFlash = 1;
+          o.vx += dx/dd*5; o.vy += dy/dd*5;
+          floatDmg(o.x, o.y, real, "#ff7a2b");
+          if (o.hp <= 0) killBall(o);
+        }
+      }
+    }
+    if (b.type === "splitter" && !b.split) {   // burst into two minis
+      for (let s=0;s<2;s++){
+        const m = new Ball({ name:"Shard", color:b.color, maxHp:Math.ceil(b.maxHp*0.35),
+          speed:b.speed*1.2, spinSpeed:b.spinSpeed*1.3, r:Math.max(12,b.r*0.55), split:true });
+        m.x=b.x; m.y=b.y; const a=rand(0,Math.PI*2);
+        m.vx=Math.cos(a)*m.speed; m.vy=Math.sin(a)*m.speed;
+        m.dmgMult=b.dmgMult; spawnQueue.push(m);
+      }
+    }
+  }
+
+  // ---------- run flow ----------
+  function startRun(cls) {
+    round = 0; runKills = 0; killFeed = []; floats = []; particles = []; hitstop = 0;
+    gold = 0; banished = new Set(); rerollCost = 3;
+    player = new Ball({ isPlayer:true, name:"YOU", color:"#ffd24a", maxHp:20, speed:3.2, spinSpeed:0.04, r:26 });
+    player.className = cls.name;
+    cls.apply(player);
+    player.hp = player.maxHp;
+    computeBonus(player);
+    nextRound();
+  }
+
+  function nextRound() {
+    round++;
+    balls = [player]; spawnQueue = []; floats = []; arenaR = ARENA_R; roundFrame = 0;
+
+    if (round % 5 === 0) {
+      // BOSS ROUND — one big armed enemy (tuned down; player is healed to full first)
+      const boss = new Ball({
+        name:"BOSS", color:"#ff2e2e", maxHp: 38 + round*8, speed: 1.9 + round*0.05,
+        spinSpeed: 0.026 + round*0.0015, r: 40, type: "normal",
+      });
+      ["hammer","flail","sword"].forEach(k => boss.addWeapon(k));
+      boss.dmgMult = 1 + round*0.035; boss.isBoss = true;
+      balls.push(boss);
+      killFeed.unshift({ text:`⚠ ROUND ${round}: BOSS`, life: 1.6 });
+    } else {
+      const enemyCount = 1 + Math.floor((round-1)/2);            // 1,1,2,2,3,3...
+      const enemyHp = 12 + round*4;
+      const enemyWeaponCount = Math.max(0, Math.floor((round-2)/2)); // weapons from round ~3
+      const palette = ["#ff5a5a","#ff8a3d","#c264ff","#3de0c0","#ff5ba6","#7be05b"];
+      for (let i=0;i<enemyCount;i++) {
+        const wk = [];
+        for (let j=0;j<enemyWeaponCount;j++) wk.push(pick(Object.keys(WEAPONS)));
+        // archetypes start appearing a few rounds in
+        let type = "normal", name = "Enemy";
+        const roll = Math.random();
+        if (round >= 4 && roll < 0.28) { type = "charger"; name = "Charger"; }
+        else if (round >= 6 && roll < 0.5) { type = "splitter"; name = "Splitter"; }
+        const e = new Ball({
+          name, type, color: palette[(round+i)%palette.length],
+          maxHp: enemyHp, speed: 2.6 + round*0.12, spinSpeed: 0.03 + round*0.004,
+          r: 22 + Math.min(round,6), weapons: wk,
+        });
+        e.dmgMult = 1 + round*0.05;
+        // elite: a beefy mini-boss with an extra weapon (non-boss rounds)
+        if (round >= 4 && Math.random() < 0.16) {
+          e.isElite = true; e.maxHp = Math.ceil(e.maxHp*2.2); e.hp = e.maxHp;
+          e.r += 8; e.dmgMult *= 1.2; e.addWeapon(pick(Object.keys(WEAPONS)));
+          e.name = "Elite " + e.name;
+        }
+        // affix: random modifier that changes behavior
+        if (round >= 3 && (e.isElite || Math.random() < 0.32)) {
+          const af = pick(AFFIXES); af.apply(e); e.affix = af.name; e.affixColor = af.color;
+          e.name = af.name + " " + e.name; e.hp = e.maxHp;
+        }
+        balls.push(e);
+      }
+    }
+    // spawn everyone evenly spaced around the arena edge, aimed inward
+    balls.forEach((b, i) => {
+      b.speed = b.baseSpeed;   // clear any accumulated wall-bounce speed from last round
+      const a = (i / balls.length) * Math.PI*2 + rand(-0.15, 0.15);
+      const d = ARENA_R - b.r - 3;
+      b.x = CX + Math.cos(a)*d; b.y = CY + Math.sin(a)*d;
+      const aim = a + Math.PI + rand(-0.5, 0.5);   // roughly toward the center
+      b.vx = Math.cos(aim)*b.speed; b.vy = Math.sin(aim)*b.speed;
+      for (const w of b.weapons) { delete w.hx; }  // reset flail swing state
+    });
+    // heal between rounds — full heal before a boss, otherwise a chunk
+    if (round % 5 === 0) player.hp = player.maxHp;
+    else if (round > 1) player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp*0.25));
+    state = "fighting";
+    hideOverlays();
+    updatePanel();
+  }
+
+  // ---------- shop ----------
+  function itemPrice(rw) { return (rw.type==="weapon" ? 9 : 6) + Math.floor(round/3); }
+  function rollShopItems(n) {
+    const pool = REWARDS.filter(rw => !banished.has(rw.name));
+    const out = [], copy = [...pool];
+    while (out.length < n && copy.length)
+      out.push({ rw: copy.splice(Math.floor(Math.random()*copy.length),1)[0], sold:false });
+    return out;
+  }
+  function openShop() {
+    state = "shop";
+    rerollCost = 3;
+    shopItems = rollShopItems(4);
+    renderShop();
+    ui.shop.classList.add('show');
+  }
+  function renderShop() {
+    el('shopRound').textContent = round;
+    el('shopGold').textContent = gold;
+    el('rerollCost').textContent = rerollCost;
+    const cc = el('shopCards'); cc.innerHTML = "";
+    shopItems.forEach((it, idx) => {
+      const price = itemPrice(it.rw);
+      const afford = gold >= price;
+      const c = document.createElement('div');
+      c.className = "card" + (it.sold ? " sold" : (afford ? "" : " tooexp"));
+      c.innerHTML =
+        `${it.sold ? '' : '<div class="banish" title="Banish from this run">🚫</div>'}
+         <div class="icon">${it.rw.icon}</div>
+         <div class="cname">${it.rw.name}</div>
+         <div class="cdesc">${it.rw.desc}</div>
+         <div class="price">${it.sold ? 'SOLD' : price+'💰'}</div>`;
+      c.onclick = (e) => {
+        if (e.target.classList.contains('banish')) { banishItem(idx); return; }
+        buyItem(idx);
+      };
+      cc.appendChild(c);
+    });
+  }
+  function buyItem(idx) {
+    const it = shopItems[idx]; if (!it || it.sold) return;
+    const price = itemPrice(it.rw);
+    if (gold < price) { beep(160,0.1,"square",0.08); return; }
+    gold -= price; it.sold = true;
+    it.rw.apply(player); computeBonus(player);
+    beep(760,0.09,"triangle",0.14);
+    renderShop(); updatePanel();
+  }
+  function banishItem(idx) {
+    const it = shopItems[idx]; if (!it || it.sold) return;
+    banished.add(it.rw.name);
+    const repl = rollShopItems(1);          // pull a fresh unbanished item into the slot
+    shopItems[idx] = repl[0] || { rw: it.rw, sold:true };
+    beep(300,0.06,"square",0.07);
+    renderShop();
+  }
+  function rerollShop() {
+    if (gold < rerollCost) { beep(160,0.1,"square",0.08); return; }
+    gold -= rerollCost; rerollCost += 2;
+    shopItems = rollShopItems(4);
+    beep(520,0.07,"square",0.08);
+    renderShop();
+  }
+
+  function bestRound(update) {
+    let best = 0;
+    try { best = +localStorage.getItem('bg_best') || 0;
+      if (update && round > best) { best = round; localStorage.setItem('bg_best', best); }
+    } catch(e) {}
+    return best;
+  }
+
+  function gameOver() {
+    state = "dead";
+    const best = bestRound(true);
+    const build = player.weapons.map(w => `${wIcon(w)}${w.evolved?'★':(w.level>1?'Lv'+w.level:'')}`).join(' ') || '—';
+    ui.deadTitle.textContent = "☠️ Defeated";
+    ui.deadText.innerHTML =
+      `You fell in <b>round ${round}</b> as a <b>${player.className}</b>.<br>` +
+      `<span style="color:#9aa4bc">${runKills} kills · build: ${build}</span><br>` +
+      `<span style="color:#ffce6b">Best run: round ${best}</span>`;
+    ui.dead.classList.add('show');
+  }
+
+  function hideOverlays() {
+    ui.start.classList.remove('show'); ui.shop.classList.remove('show'); ui.dead.classList.remove('show');
+  }
+
+  // ---------- weapon geometry ----------
+  // Flail: the head is a free point mass on a chain of length (len - hitR).
+  // Verlet integration + a distance constraint to the (kinematic) anchor on the
+  // ball's shell. The anchor rotates with spin & travels with the ball, so the
+  // head naturally lags, swings, and flings outward centrifugally.
+  function updateFlail(b, w) {
+    const ang = b.spin + w.angleOffset;
+    const ax = b.x + Math.cos(ang)*b.r, ay = b.y + Math.sin(ang)*b.r;
+    const chain = wLen(w) - wHitR(w);
+    if (w.hx === undefined) {           // lazy init: fling it out along the anchor
+      w.hx = ax + Math.cos(ang)*chain; w.hy = ay + Math.sin(ang)*chain;
+      w.px = w.hx; w.py = w.hy;
+    }
+    let vx = (w.hx - w.px)*0.985, vy = (w.hy - w.py)*0.985;   // inertia + mild drag
+    w.px = w.hx; w.py = w.hy;
+    w.hx += vx; w.hy += vy;
+    let dx = w.hx - ax, dy = w.hy - ay, d = Math.hypot(dx,dy) || 1;
+    const diff = (d - chain)/d;         // pull head back onto the chain length
+    w.hx -= dx*diff; w.hy -= dy*diff;
+    w.ax = ax; w.ay = ay;               // remember anchor for drawing
+  }
+
+  function weaponCircles(ball, w) {
+    const def = WEAPONS[w.key];
+    const len = wLen(w), hitR = wHitR(w);
+    if (def.name === "Flail") {         // hit circle rides the swinging head
+      if (w.hx === undefined) updateFlail(ball, w);
+      return [{ x:w.hx, y:w.hy, r:hitR }];
+    }
+    const ang = ball.spin + w.angleOffset;
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    const tip = ball.r + len;
+    const out = [];
+    if (def.name === "Hammer" || def.name === "Saw") {
+      out.push({ x: ball.x + dx*tip, y: ball.y + dy*tip, r: hitR });
+    } else {
+      const samples = len > 34 ? 3 : 2;
+      const from = ball.r + len*0.4;
+      for (let k=0;k<samples;k++){
+        const d = from + (tip-from)*(k/(samples-1));
+        out.push({ x: ball.x + dx*d, y: ball.y + dy*d, r: hitR });
+      }
+    }
+    return out;
+  }
+
+  function applyDamage(attacker, target, dmg, hx, hy, dirx, diry, knock) {
+    const real = Math.max(1, dmg - effArmor(target));
+    target.hp -= real;
+    target.hitFlash = 1;
+    // knockback
+    target.vx += dirx*knock; target.vy += diry*knock;
+    spawnParticles(hx, hy, target.color, 8, 5);
+    floatDmg(hx, hy, real, target.isPlayer ? "#ff6b6b" : "#ffffff");
+    const ls = effLife(attacker);
+    if (ls > 0 && !attacker.dead)
+      attacker.hp = Math.min(attacker.maxHp, attacker.hp + real*ls);
+    beep(420 + Math.random()*60, 0.04, "square", 0.06);
+    if (target.hp <= 0) killBall(target);
+  }
+  // damage-over-time and other non-attributed damage (no lifesteal/knockback)
+  function tickDamage(target, dmg, color) {
+    target.hp -= dmg; target.hitFlash = 0.6;
+    spawnParticles(target.x, target.y, color, 4, 3);
+    floatDmg(target.x, target.y, dmg, color);
+    if (target.hp <= 0) killBall(target);
+  }
+
+  // weapon-on-weapon clashes: when two balls' blades meet, they spark and deflect
+  function resolveClashes() {
+    for (let i=0;i<balls.length;i++){ const a=balls[i]; if(a.dead||!a.weapons.length)continue;
+      for (let j=i+1;j<balls.length;j++){ const b=balls[j]; if(b.dead||!b.weapons.length)continue;
+        if (a.clashCd[b.id]) continue;
+        const ca = a.weapons.flatMap(w=>weaponCircles(a,w));
+        const cb = b.weapons.flatMap(w=>weaponCircles(b,w));
+        let hit=null;
+        for (const x of ca){ for (const y of cb){
+          const dx=x.x-y.x, dy=x.y-y.y;
+          if (Math.hypot(dx,dy) < x.r+y.r){ hit={ mx:(x.x+y.x)/2, my:(y.y+x.y)/2 }; break; }
+        } if (hit) break; }
+        if (hit) {
+          // two weapons meeting = a guaranteed parry for both
+          spawnParticles(hit.mx, hit.my, "#fff3b0", 12, 6);
+          floatText(hit.mx, hit.my, "PARRY", "#ffe27a");
+          ting();
+          const bx=b.x-a.x, by=b.y-a.y, bl=Math.hypot(bx,by)||1;
+          a.vx -= bx/bl*1.6; a.vy -= by/bl*1.6; b.vx += bx/bl*1.6; b.vy += by/bl*1.6;
+          a.parryFlash = 1; b.parryFlash = 1;
+          a.spinSpeed *= -1; b.spinSpeed *= -1;   // parry reverses spin
+          a.clashCd[b.id] = 12; b.clashCd[a.id] = 12;
+        }
+      }
+    }
+  }
+
+  // ---------- simulation ----------
+  function step() {
+    computeBonus(player);   // synergies re-evaluated live (some depend on current HP/speed)
+    // shrinking arena: after ~7s of a round it squeezes inward to force a finish
+    roundFrame++;
+    if (roundFrame > 420) arenaR = Math.max(arenaR - 0.35, ARENA_R * 0.55);
+    for (const b of balls) {
+      if (b.dead) continue;
+      // status effects
+      const frost = b.status.frost > 0 ? 0.5 : 1;
+      if (b.status.frost > 0) b.status.frost--;
+      if (b.status.burn > 0) { b.status.burn--; if (b.status.burn % 20 === 0) tickDamage(b, 1, "#ff7a2b"); if (b.dead) continue; }
+      b.spin += b.spinSpeed * b.bonus.spinMult * frost;
+      b.x += b.vx; b.y += b.vy;
+      if (b.hitFlash > 0) b.hitFlash -= 0.08;
+      if (b.parryFlash > 0) b.parryFlash -= 0.06;
+      for (const k in b.contactCd) if ((b.contactCd[k]-=1) <= 0) delete b.contactCd[k];
+      for (const k in b.clashCd)   if ((b.clashCd[k]-=1)   <= 0) delete b.clashCd[k];
+      if (b.regen && b.hp < b.maxHp) b.hp = Math.min(b.maxHp, b.hp + 0.04);   // affix
+      if (b.dashCd > 0) b.dashCd--;
+      if (b.dashFrames > 0) b.dashFrames--;
+      // charger AI: steer velocity toward the player
+      if (b.type === "charger" && !b.isPlayer && !player.dead) {
+        const tx=player.x-b.x, ty=player.y-b.y, tl=Math.hypot(tx,ty)||1;
+        b.vx += (tx/tl)*0.35; b.vy += (ty/tl)*0.35;
+      }
+      // optional player control: steer toward the mouse cursor
+      if (b.isPlayer && controlOn) {
+        const tx=mouseX-b.x, ty=mouseY-b.y, tl=Math.hypot(tx,ty)||1;
+        b.vx += (tx/tl)*0.6; b.vy += (ty/tl)*0.6;
+      }
+      // arena wall — bounce, and speed up on every hit
+      const ddx=b.x-CX, ddy=b.y-CY, dist=Math.hypot(ddx,ddy);
+      if (dist + b.r > arenaR) {
+        const nx=ddx/dist, ny=ddy/dist, dot=b.vx*nx+b.vy*ny;
+        b.vx -= 2*dot*nx; b.vy -= 2*dot*ny;
+        b.x = CX + nx*(arenaR-b.r); b.y = CY + ny*(arenaR-b.r);
+        b.speed = Math.min(b.speed*1.06, 16);   // faster each wall hit (capped so physics stays stable)
+        beep(240+b.r*3 + b.speed*8, 0.03, "square", 0.03);
+        spawnParticles(b.x, b.y, b.color, 4, b.speed);
+      }
+      // lock velocity to current speed so it never bleeds off (walls & frost change it)
+      const dashMul = (b.isPlayer && b.dashFrames > 0) ? 2.4 : 1;
+      const sp = Math.hypot(b.vx,b.vy) || 1, tsp = Math.min(b.speed*b.bonus.speedMult, 18) * frost * dashMul;
+      b.vx = b.vx/sp*tsp; b.vy = b.vy/sp*tsp;
+      // swing any flails (free-mass pendulum on a chain)
+      for (const w of b.weapons) if (WEAPONS[w.key].name==="Flail") updateFlail(b,w);
+    }
+
+    // body-body collisions (bounce + thorns)
+    for (let i=0;i<balls.length;i++){ const a=balls[i]; if(a.dead)continue;
+      for (let j=i+1;j<balls.length;j++){ const b=balls[j]; if(b.dead)continue;
+        const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy), min=a.r+b.r;
+        if (d<min && d>0){
+          const nx=dx/d, ny=dy/d, ov=(min-d)/2;
+          a.x-=nx*ov; a.y-=ny*ov; b.x+=nx*ov; b.y+=ny*ov;
+          const dvx=b.vx-a.vx, dvy=b.vy-a.vy, p=dvx*nx+dvy*ny;
+          if (p<0){ a.vx+=p*nx; a.vy+=p*ny; b.vx-=p*nx; b.vy-=p*ny; }
+          // base body-slam damage (both take it), gated by a short cooldown so one bump = one hit
+          if (!a.contactCd[b.id] && !b.contactCd[a.id]) {
+            applyDamage(a, b, BODY_DMG + effThorns(a), b.x, b.y, nx, ny, 1.2);
+            applyDamage(b, a, BODY_DMG + effThorns(b), a.x, a.y, -nx, -ny, 1.2);
+            a.contactCd[b.id] = 14; b.contactCd[a.id] = 14;
+          }
+          beep(300,0.03,"square",0.04);
+        }
+      }
+    }
+
+    // weapon strikes (free-for-all)
+    for (const a of balls){ if(a.dead)continue;
+      for (const w of a.weapons){
+        const def = WEAPONS[w.key];
+        for (const k in w.cd) if ((w.cd[k]-=1) <= 0) delete w.cd[k];
+        const circles = weaponCircles(a,w);
+        for (const b of balls){
+          if (b===a || b.dead) continue;
+          if (w.cd[b.id] > 0) continue;
+          for (const c of circles){
+            const dx=b.x-c.x, dy=b.y-c.y;
+            if (Math.hypot(dx,dy) < c.r + b.r){
+              const dl=Math.hypot(dx,dy)||1, dirx=dx/dl, diry=dy/dl;
+              // PARRY: chance for the defender to deflect the strike entirely
+              if (Math.random() < effParry(b)) {
+                spawnParticles(c.x, c.y, "#ffe27a", 12, 6);
+                floatText(c.x, c.y, "PARRY", "#ffe27a");
+                ting();
+                b.parryFlash = 1;
+                b.spinSpeed *= -1;   // parry reverses the defender's spin
+                // stagger: shove the attacker away from the defender
+                const abx=a.x-b.x, aby=a.y-b.y, abl=Math.hypot(abx,aby)||1;
+                a.vx += abx/abl*3.5; a.vy += aby/abl*3.5;
+                // riposte synergy: strike back
+                if (b.bonus.riposteDmg > 0 && !a.dead)
+                  applyDamage(b, a, b.bonus.riposteDmg, a.x, a.y, abx/abl, aby/abl, 1.5);
+                w.cd[b.id] = wCd(w);
+                hitstop = Math.max(hitstop, 2);
+                break;
+              }
+              const knock = (def.name==="Hammer"?4.5:1.5) * a.bonus.knockMult;
+              applyDamage(a,b, wDmg(w)*effDmg(a), c.x,c.y, dirx,diry, knock);
+              if (def.applies && !b.dead) b.status[def.applies] = STATUS_DUR[def.applies];
+              w.cd[b.id] = wCd(w);
+              shake = Math.min(shake+2, 24);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    resolveClashes();   // blades meeting blades spark & deflect
+
+    // add anything spawned this frame (splitter shards)
+    if (spawnQueue.length) { balls.push(...spawnQueue); spawnQueue = []; }
+
+    // particles + floating numbers + kill feed + shake
+    for (const p of particles){ p.x+=p.vx; p.y+=p.vy; p.vx*=0.93; p.vy*=0.93; p.life-=0.03; }
+    particles = particles.filter(p=>p.life>0);
+    for (const f of floats){ f.y+=f.vy; f.vy*=0.92; f.life-=0.02; }
+    floats = floats.filter(f=>f.life>0);
+    for (const k of killFeed) k.life -= 0.006;
+    killFeed = killFeed.filter(k=>k.life>0);
+    if (shake>0) shake*=0.85;
+
+    // win/lose checks
+    if (player.dead) { gameOver(); return; }
+    const enemiesLeft = balls.some(b => !b.isPlayer && !b.dead);
+    if (!enemiesLeft) { beep(880,0.12,"triangle",0.18); setTimeout(()=>beep(1320,0.25,"triangle",0.18),110); openShop(); }
+  }
+
+  // ---------- rendering ----------
+  function drawWeapon(b, w) {
+    const def = WEAPONS[w.key];
+    const len = wLen(w), hitR = wHitR(w), col = wColor(w);
+    if (def.name === "Flail") {         // drawn in world space along the swinging chain
+      if (w.hx === undefined) updateFlail(b, w);
+      ctx.strokeStyle = "#6a6a76"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(w.ax, w.ay); ctx.lineTo(w.hx, w.hy); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(w.hx, w.hy, hitR, 0, Math.PI*2); ctx.fill();
+      const spa = Math.atan2(w.hy-w.ay, w.hx-w.ax);
+      ctx.fillStyle = "#4a4a54";
+      for (let t=0;t<6;t++){ const ta = spa + t*Math.PI/3;
+        ctx.beginPath(); ctx.arc(w.hx+Math.cos(ta)*hitR, w.hy+Math.sin(ta)*hitR, 2, 0, Math.PI*2); ctx.fill(); }
+      return;
+    }
+    const ang = b.spin + w.angleOffset;
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    ctx.rotate(ang);
+    const base = b.r, tip = b.r + len;
+    ctx.lineCap = "round";
+    if (def.name==="Hammer") {
+      ctx.strokeStyle="#7a5b34"; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(base,0); ctx.lineTo(tip-6,0); ctx.stroke();
+      ctx.fillStyle=col; ctx.fillRect(tip-10, -hitR, 16, hitR*2);
+    } else if (def.name==="Saw") {
+      ctx.fillStyle=col; ctx.beginPath(); ctx.arc(tip, 0, hitR, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle="#5a6472";
+      for (let t=0;t<8;t++){ const ta=b.spin*3 + t*Math.PI/4;
+        ctx.beginPath(); ctx.arc(tip+Math.cos(ta)*hitR, Math.sin(ta)*hitR, 2.5,0,Math.PI*2); ctx.fill(); }
+    } else if (def.name==="Torch" || def.name==="Frostbite") {
+      ctx.strokeStyle=col; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(base,0); ctx.lineTo(tip,0); ctx.stroke();
+      ctx.fillStyle=col; ctx.globalAlpha=0.85;
+      ctx.beginPath(); ctx.arc(tip, 0, hitR, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha=1;
+    } else if (def.name==="Lance") {
+      ctx.strokeStyle="#8a7a4a"; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(base,0); ctx.lineTo(tip-10,0); ctx.stroke();
+      ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(tip-12,-5); ctx.lineTo(tip,0); ctx.lineTo(tip-12,5); ctx.closePath(); ctx.fill();
+    } else { // sword / dagger / spike
+      ctx.strokeStyle=col; ctx.lineWidth = (def.name==="Sword"?6:4) + (w.level-1)*2;
+      ctx.beginPath(); ctx.moveTo(base,0); ctx.lineTo(tip,0); ctx.stroke();
+      // pointed tip
+      ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(tip-3,-3); ctx.lineTo(tip+4,0); ctx.lineTo(tip-3,3); ctx.closePath(); ctx.fill();
+      if (def.name==="Sword"){ ctx.strokeStyle="#8a93a6"; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(base+2,-6); ctx.lineTo(base+2,6); ctx.stroke(); }
+    }
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    ctx.save();
+    if (shake>0.4) ctx.translate(rand(-shake,shake)*0.4, rand(-shake,shake)*0.4);
+
+    // shrinking arena ring (glows red as it closes in)
+    const closing = arenaR < ARENA_R - 1;
+    ctx.beginPath(); ctx.arc(CX,CY,arenaR,0,Math.PI*2);
+    ctx.strokeStyle = closing ? "rgba(255,90,90,.5)" : "rgba(255,255,255,.12)";
+    ctx.lineWidth=6; ctx.stroke();
+    ctx.save(); ctx.beginPath(); ctx.arc(CX,CY,arenaR,0,Math.PI*2); ctx.clip();
+
+    for (const p of particles){ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color;
+      ctx.beginPath(); ctx.arc(p.x,p.y,3*p.life+1,0,Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha=1;
+
+    for (const b of balls){
+      if (b.dead) continue;
+      // weapons under body edge
+      for (const w of b.weapons) drawWeapon(b,w);
+      // body
+      ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+      // status tint overlays
+      if (b.status.burn>0){ ctx.globalAlpha=0.35; ctx.fillStyle="#ff7a2b";
+        ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
+      if (b.status.frost>0){ ctx.globalAlpha=0.35; ctx.fillStyle="#7fdfff";
+        ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
+      if (b.isPlayer){ ctx.strokeStyle="#fff5cc"; ctx.lineWidth=3; ctx.stroke(); }
+      else if (b.isBoss){ ctx.strokeStyle="#fff"; ctx.lineWidth=4; ctx.stroke(); }
+      else if (b.isElite){ ctx.strokeStyle="#ffd24a"; ctx.lineWidth=3; ctx.stroke(); }
+      else if (b.affixColor){ ctx.strokeStyle=b.affixColor; ctx.lineWidth=2.5; ctx.stroke(); }
+      if (b.hitFlash>0){ ctx.globalAlpha=b.hitFlash; ctx.fillStyle="#fff";
+        ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
+      if (b.parryFlash>0){ ctx.globalAlpha=b.parryFlash; ctx.strokeStyle="#ffe27a"; ctx.lineWidth=4;
+        ctx.beginPath(); ctx.arc(b.x,b.y,b.r+6+(1-b.parryFlash)*10,0,Math.PI*2); ctx.stroke(); ctx.globalAlpha=1; }
+      // hp ring
+      const frac=Math.max(0,b.hp/b.maxHp);
+      ctx.beginPath(); ctx.arc(b.x,b.y,b.r+5,-Math.PI/2,-Math.PI/2+frac*Math.PI*2);
+      ctx.strokeStyle=b.isPlayer?"#fff":"rgba(255,255,255,.8)"; ctx.lineWidth=3; ctx.stroke();
+      // label
+      ctx.fillStyle="rgba(0,0,0,.7)"; ctx.textAlign="center";
+      ctx.font="bold 11px ui-sans-serif,system-ui";
+      ctx.fillText(b.isPlayer?"YOU":(b.isBoss?"BOSS":Math.max(0,Math.ceil(b.hp))), b.x, b.y+4);
+    }
+
+    // control cursor
+    if (controlOn && state==="fighting") {
+      ctx.strokeStyle="rgba(255,255,255,.4)"; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(mouseX, mouseY, 8, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mouseX-12,mouseY); ctx.lineTo(mouseX-4,mouseY);
+      ctx.moveTo(mouseX+4,mouseY); ctx.lineTo(mouseX+12,mouseY); ctx.stroke();
+    }
+    // floating damage numbers (bigger, and pop as they spawn)
+    ctx.textAlign="center";
+    for (const f of floats){ ctx.globalAlpha=Math.max(0,f.life); ctx.fillStyle=f.color;
+      ctx.font = "bold " + Math.round(22 + 10*f.life) + "px ui-sans-serif,system-ui";
+      ctx.fillText(f.text, f.x, f.y); }
+    ctx.globalAlpha=1;
+    ctx.restore(); ctx.restore();
+
+    // kill feed (top-left, outside clip)
+    ctx.textAlign="left"; ctx.font="bold 13px ui-sans-serif,system-ui";
+    killFeed.forEach((k,i)=>{ ctx.globalAlpha=Math.min(1,k.life); ctx.fillStyle="#e8ecf5";
+      ctx.fillText(k.text, 18, 28 + i*20); });
+    ctx.globalAlpha=1;
+  }
+
+  // ---------- panel ----------
+  function updatePanel() {
+    if (!player) return;
+    computeBonus(player);
+    const bn = player.bonus;
+    el('className').textContent = player.className || "—";
+    el('roundNum').textContent = round;
+    el('sGold').textContent = gold;
+    el('hpText').textContent = `${Math.max(0,Math.ceil(player.hp))} / ${player.maxHp}`;
+    el('hpFill').style.width = Math.max(0,player.hp/player.maxHp*100)+"%";
+    el('sMaxHp').textContent = player.maxHp;
+    el('sDmg').textContent = "×"+effDmg(player).toFixed(2);
+    el('sSpin').textContent = (Math.abs(player.spinSpeed)*bn.spinMult/0.04).toFixed(2)+"×";
+    el('sSpeed').textContent = (player.baseSpeed*bn.speedMult).toFixed(1);
+    el('sArmor').textContent = effArmor(player);
+    el('sLifesteal').textContent = Math.round(effLife(player)*100)+"%";
+    el('sThorns').textContent = effThorns(player);
+    el('sParry').textContent = Math.round(effParry(player)*100)+"%";
+    const syn = el('synergies');
+    if (!player.activeSynergies.length) syn.innerHTML = '<span class="sub">none active</span>';
+    else syn.innerHTML = player.activeSynergies.map(s =>
+      `<span class="wchip syn" title="${s.desc}">${s.icon} ${s.name}</span>`).join('');
+    const wl = el('wlist');
+    if (!player.weapons.length) wl.innerHTML = '<span class="sub">none yet</span>';
+    else wl.innerHTML = player.weapons.map(w =>
+      `<span class="wchip">${wIcon(w)} ${wName(w)}${w.evolved?' <b style="color:#ff9de0">★</b>':(w.level>1?' <b style="color:#ffce6b">Lv'+w.level+'</b>':'')}</span>`).join('');
+  }
+
+  // ---------- loop ----------
+  let tick=0;
+  function loop() {
+    if (state==="fighting") {
+      if (hitstop > 0) hitstop--;      // freeze-frame on kills/big hits for punch
+      else step();
+      if (++tick%5===0) updatePanel();
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- wiring ----------
+  function renderClassCards() {
+    const cc = el('classCards'); cc.innerHTML = "";
+    CLASSES.forEach(cl => {
+      const c = document.createElement('div');
+      c.className = "card small";
+      c.innerHTML = `<div class="icon">${cl.icon}</div><div class="cname">${cl.name}</div><div class="cdesc">${cl.desc}</div>`;
+      c.onclick = () => { if(!ac) ac=new(window.AudioContext||window.webkitAudioContext)(); startRun(cl); };
+      cc.appendChild(c);
+    });
+  }
+  el('restartBtn').onclick = () => { ui.dead.classList.remove('show'); ui.start.classList.add('show'); state = "menu"; };
+  el('soundBtn').onclick = (e) => { soundOn=!soundOn; e.target.textContent = "🔊 Sound: "+(soundOn?"On":"Off"); };
+  el('controlBtn').onclick = (e) => { controlOn=!controlOn; e.target.textContent = "🕹️ Control: "+(controlOn?"On":"Off"); };
+  el('rerollBtn').onclick = rerollShop;
+  el('continueBtn').onclick = () => { if (state==="shop") nextRound(); };
+
+  // player-control input
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - r.left) / r.width * W;
+    mouseY = (e.clientY - r.top)  / r.height * H;
+  });
+  window.addEventListener('keydown', e => {
+    if (e.code === "Space" && controlOn && player && !player.dead && state === "fighting" && player.dashCd <= 0) {
+      player.dashFrames = 10; player.dashCd = 75;
+      spawnParticles(player.x, player.y, player.color, 10, 6);
+      beep(500, 0.08, "sawtooth", 0.1);
+      e.preventDefault();
+    }
+  });
+
+  renderClassCards();
+  { const best = bestRound(false); if (best) el('records').textContent = `🏆 Best run: round ${best}`; }
+  loop();
+})();
+</script>
+</body>
+</html>
