@@ -65,8 +65,19 @@
       <h2>⚔️ Ball Roguelike</h2>
       <p>Choose your class. Your ball fights on its own — you build it.</p>
       <div class="cards" id="classCards"></div>
+      <button id="upgradesBtn" class="ghost">⬡ Permanent Upgrades</button>
       <div class="hint" style="max-width:400px">Weapons orbit your ball and strike as you spin. Combine the right weapons and stats to trigger <b>synergies</b>. Survive <b>boss rounds</b> every 5th floor.</div>
-      <div id="records" class="hint" style="color:#ffce6b"></div>
+      <div style="display:flex; gap:16px">
+        <div id="coreBal" class="hint" style="color:#b9a7ff"></div>
+        <div id="records" class="hint" style="color:#ffce6b"></div>
+      </div>
+    </div>
+
+    <div id="metaOverlay" class="overlay">
+      <h2>⬡ Permanent Upgrades</h2>
+      <p><span style="color:#b9a7ff">⬡ <b id="metaCores">0</b> cores</span> — earned every run, spent forever</p>
+      <div class="cards" id="metaList"></div>
+      <button id="metaBackBtn" class="ghost">← Back</button>
     </div>
 
     <div id="shopOverlay" class="overlay">
@@ -215,17 +226,42 @@
 
   // ---------- classes (chosen at run start) ----------
   const CLASSES = [
-    { id:"knight", name:"Knight", icon:"🛡️", desc:"Sturdy all-rounder. Sword, +8 HP, armor & parry.",
+    { id:"knight", name:"Knight", icon:"🛡️", unlockCost:0, desc:"Sturdy all-rounder. Sword, +8 HP, armor & parry.",
       apply:p=>{ p.addWeapon("sword"); p.maxHp+=8; p.armor+=1; p.parry+=0.15; } },
-    { id:"berserker", name:"Berserker", icon:"🩸", desc:"Twin daggers & lifesteal, but fragile.",
+    { id:"berserker", name:"Berserker", icon:"🩸", unlockCost:0, desc:"Twin daggers & lifesteal, but fragile.",
       apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=4; } },
-    { id:"juggernaut", name:"Juggernaut", icon:"🔨", desc:"Hammer bruiser. Big & tanky, slow spin.",
+    { id:"juggernaut", name:"Juggernaut", icon:"🔨", unlockCost:15, desc:"Hammer bruiser. Big & tanky, slow spin.",
       apply:p=>{ p.addWeapon("hammer"); p.maxHp+=14; p.thorns+=2; p.spinSpeed*=0.7; p.r+=4; } },
-    { id:"whirlwind", name:"Whirlwind", icon:"🌀", desc:"Twin spikes, blazing spin, small & quick.",
+    { id:"whirlwind", name:"Whirlwind", icon:"🌀", unlockCost:20, desc:"Twin spikes, blazing spin, small & quick.",
       apply:p=>{ p.addWeapon("spike"); p.addWeapon("spike"); p.spinSpeed*=1.6; p.baseSpeed*=1.1; p.r-=3; } },
-    { id:"lancer", name:"Lancer", icon:"🏹", desc:"Long lance & extra speed. Strike first.",
+    { id:"lancer", name:"Lancer", icon:"🏹", unlockCost:25, desc:"Long lance & extra speed. Strike first.",
       apply:p=>{ p.addWeapon("lance"); p.baseSpeed*=1.2; p.dmgMult*=1.1; } },
   ];
+
+  // ---------- meta-progression (persists across runs) ----------
+  const META_UPGRADES = [
+    { id:"vigor",    name:"Vigor",       icon:"❤️", max:5, costBase:4,  costStep:3,  effect:l=>`+${l*3} starting Max HP`,   apply:(p,l)=>{ p.maxHp += l*3; } },
+    { id:"edge",     name:"Edge",        icon:"🗡️", max:5, costBase:5,  costStep:4,  effect:l=>`+${l*5}% damage`,           apply:(p,l)=>{ p.dmgMult *= (1 + l*0.05); } },
+    { id:"reflexes", name:"Reflexes",    icon:"🤺", max:3, costBase:6,  costStep:5,  effect:l=>`+${l*3}% parry`,            apply:(p,l)=>{ p.parry += l*0.03; } },
+    { id:"fortune",  name:"Fortune",     icon:"💰", max:5, costBase:3,  costStep:3,  effect:l=>`+${l*5} starting gold`,     apply:()=>{} },
+    { id:"slots",    name:"Bigger Shop", icon:"🏪", max:2, costBase:12, costStep:12, effect:l=>`+${l} shop item slot(s)`,   apply:()=>{} },
+  ];
+  const upgCost = (up, curLevel) => up.costBase + curLevel*up.costStep;
+
+  function loadMeta() {
+    let m = {};
+    try { m = JSON.parse(localStorage.getItem('bg_meta')) || {}; } catch(e) {}
+    return {
+      cores: m.cores || 0,
+      upgrades: Object.assign({ vigor:0, edge:0, reflexes:0, fortune:0, slots:0 }, m.upgrades || {}),
+      classes: (m.classes && m.classes.length) ? m.classes : ["knight","berserker"],
+    };
+  }
+  function saveMeta() { try { localStorage.setItem('bg_meta', JSON.stringify(meta)); } catch(e) {} }
+  function applyMeta(p) {
+    for (const up of META_UPGRADES) { const l = meta.upgrades[up.id]||0; if (l>0) up.apply(p, l); }
+  }
+  let meta = loadMeta();
 
   // ---------- synergies (evaluated live from your build) ----------
   const SYNERGIES = [
@@ -340,7 +376,7 @@
   const el = id => document.getElementById(id);
   const ui = {
     start: el('startOverlay'), shop: el('shopOverlay'), dead: el('deadOverlay'),
-    deadText: el('deadText'), deadTitle: el('deadTitle'),
+    meta: el('metaOverlay'), deadText: el('deadText'), deadTitle: el('deadTitle'),
   };
 
   function spawnParticles(x,y,color,n=10,spd=5) {
@@ -411,6 +447,8 @@
     player = new Ball({ isPlayer:true, name:"YOU", color:"#ffd24a", maxHp:20, speed:3.2, spinSpeed:0.04, r:26 });
     player.className = cls.name;
     cls.apply(player);
+    applyMeta(player);                          // permanent upgrades
+    gold = (meta.upgrades.fortune||0) * 5;      // Fortune: starting gold
     player.hp = player.maxHp;
     computeBonus(player);
     nextRound();
@@ -493,7 +531,7 @@
   function openShop() {
     state = "shop";
     rerollCost = 3;
-    shopItems = rollShopItems(4);
+    shopItems = rollShopItems(4 + (meta.upgrades.slots||0));
     renderShop();
     ui.shop.classList.add('show');
   }
@@ -540,7 +578,7 @@
   function rerollShop() {
     if (gold < rerollCost) { beep(160,0.1,"square",0.08); return; }
     gold -= rerollCost; rerollCost += 2;
-    shopItems = rollShopItems(4);
+    shopItems = rollShopItems(4 + (meta.upgrades.slots||0));
     beep(520,0.07,"square",0.08);
     renderShop();
   }
@@ -557,16 +595,20 @@
     state = "dead";
     const best = bestRound(true);
     const build = player.weapons.map(w => `${wIcon(w)}${w.evolved?'★':(w.level>1?'Lv'+w.level:'')}`).join(' ') || '—';
+    const earned = round*2 + Math.floor(runKills/3);   // cores scale with how far you got
+    meta.cores += earned; saveMeta();
     ui.deadTitle.textContent = "☠️ Defeated";
     ui.deadText.innerHTML =
       `You fell in <b>round ${round}</b> as a <b>${player.className}</b>.<br>` +
       `<span style="color:#9aa4bc">${runKills} kills · build: ${build}</span><br>` +
+      `<span style="color:#b9a7ff">+⬡${earned} cores earned (⬡${meta.cores} total)</span><br>` +
       `<span style="color:#ffce6b">Best run: round ${best}</span>`;
     ui.dead.classList.add('show');
   }
 
   function hideOverlays() {
-    ui.start.classList.remove('show'); ui.shop.classList.remove('show'); ui.dead.classList.remove('show');
+    ui.start.classList.remove('show'); ui.shop.classList.remove('show');
+    ui.dead.classList.remove('show'); ui.meta.classList.remove('show');
   }
 
   // ---------- weapon geometry ----------
@@ -950,21 +992,68 @@
   }
 
   // ---------- wiring ----------
+  function updateStartCores() {
+    el('coreBal').textContent = `⬡ ${meta.cores} cores`;
+    el('upgradesBtn').textContent = `⬡ Permanent Upgrades (${meta.cores})`;
+  }
   function renderClassCards() {
     const cc = el('classCards'); cc.innerHTML = "";
     CLASSES.forEach(cl => {
+      const unlocked = meta.classes.includes(cl.id);
       const c = document.createElement('div');
-      c.className = "card small";
-      c.innerHTML = `<div class="icon">${cl.icon}</div><div class="cname">${cl.name}</div><div class="cdesc">${cl.desc}</div>`;
-      c.onclick = () => { if(!ac) ac=new(window.AudioContext||window.webkitAudioContext)(); startRun(cl); };
+      c.className = "card small" + (unlocked ? "" : (meta.cores >= cl.unlockCost ? "" : " tooexp"));
+      c.innerHTML = `<div class="icon">${cl.icon}</div><div class="cname">${cl.name}</div>`
+        + `<div class="cdesc">${cl.desc}</div>`
+        + (unlocked ? "" : `<div class="price">🔒 ${cl.unlockCost}⬡</div>`);
+      c.onclick = () => {
+        if (!unlocked) {
+          if (meta.cores >= cl.unlockCost) {
+            meta.cores -= cl.unlockCost; meta.classes.push(cl.id); saveMeta();
+            beep(760,0.1,"triangle",0.14); renderClassCards(); updateStartCores();
+          } else beep(160,0.1,"square",0.08);
+          return;
+        }
+        if(!ac) ac=new(window.AudioContext||window.webkitAudioContext)(); startRun(cl);
+      };
       cc.appendChild(c);
     });
   }
-  el('restartBtn').onclick = () => { ui.dead.classList.remove('show'); ui.start.classList.add('show'); state = "menu"; };
+  function renderMeta() {
+    el('metaCores').textContent = meta.cores;
+    const list = el('metaList'); list.innerHTML = "";
+    META_UPGRADES.forEach(up => {
+      const lvl = meta.upgrades[up.id] || 0;
+      const maxed = lvl >= up.max;
+      const cost = upgCost(up, lvl);
+      const c = document.createElement('div');
+      c.className = "card small" + (maxed ? " sold" : (meta.cores >= cost ? "" : " tooexp"));
+      c.innerHTML = `<div class="icon">${up.icon}</div><div class="cname">${up.name}</div>`
+        + `<div class="cdesc">${up.effect(Math.min(lvl+1, up.max))}</div>`
+        + `<div class="cdesc" style="color:#9be0b0">Lv ${lvl}/${up.max}</div>`
+        + `<div class="price">${maxed ? 'MAX' : cost+'⬡'}</div>`;
+      if (!maxed) c.onclick = () => buyUpgrade(up.id);
+      list.appendChild(c);
+    });
+  }
+  function buyUpgrade(id) {
+    const up = META_UPGRADES.find(u => u.id === id);
+    const lvl = meta.upgrades[id] || 0;
+    if (lvl >= up.max) return;
+    const cost = upgCost(up, lvl);
+    if (meta.cores < cost) { beep(160,0.1,"square",0.08); return; }
+    meta.cores -= cost; meta.upgrades[id] = lvl+1; saveMeta();
+    beep(760,0.09,"triangle",0.14); renderMeta();
+  }
+  el('restartBtn').onclick = () => {
+    ui.dead.classList.remove('show'); ui.start.classList.add('show'); state = "menu";
+    updateStartCores(); renderClassCards();
+  };
   el('soundBtn').onclick = (e) => { soundOn=!soundOn; e.target.textContent = "🔊 Sound: "+(soundOn?"On":"Off"); };
   el('controlBtn').onclick = (e) => { controlOn=!controlOn; e.target.textContent = "🕹️ Control: "+(controlOn?"On":"Off"); };
   el('rerollBtn').onclick = rerollShop;
   el('continueBtn').onclick = () => { if (state==="shop") nextRound(); };
+  el('upgradesBtn').onclick = () => { renderMeta(); ui.meta.classList.add('show'); };
+  el('metaBackBtn').onclick = () => { ui.meta.classList.remove('show'); updateStartCores(); renderClassCards(); };
 
   // player-control input
   canvas.addEventListener('mousemove', e => {
@@ -982,6 +1071,7 @@
   });
 
   renderClassCards();
+  updateStartCores();
   { const best = bestRound(false); if (best) el('records').textContent = `🏆 Best run: round ${best}`; }
   loop();
 })();
