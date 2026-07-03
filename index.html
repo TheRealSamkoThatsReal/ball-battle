@@ -759,18 +759,18 @@
     switch (p.abilityId) {
       case "juggernaut": {                 // Overdrive: wind up spin, hold until you hit something, then SLAM
         if (st.phase === "main") {
-          p.abSpinMul = 1 + Math.min(st.t * 0.09, 8);     // keep gaining spin, cap ~9x
+          p.abSpinMul = 1 + st.t * 0.045;                 // slower ramp, no cap — spins up indefinitely
           if (st.t % 4 === 0) spawnParticles(p.x, p.y, "#ffb03d", 5, 4);
-          // release the moment we make contact with an enemy (fallback after ~10s)
+          // release the moment we make contact with an enemy
           let target = null;
           for (const e of balls) {
             if (e === p || e.dead) continue;
             const dx=e.x-p.x, dy=e.y-p.y;
             if (Math.hypot(dx,dy) < p.r + e.r + 6) { target = e; break; }
           }
-          if (target || st.t > 600) { st.phase = "slam"; st.charge = st.t; }
+          if (target) { st.phase = "slam"; st.charge = st.t; }
         } else {                                           // release — bigger the longer you charged
-          const R = p.r + 140, chargeMul = 1 + Math.min((st.charge||0)/120, 1.5);
+          const R = p.r + 140, chargeMul = 1 + (st.charge||0)/150;   // uncapped: longer charge, bigger slam
           const dmg = (28 + round*3) * effDmg(p) * chargeMul;
           for (const e of balls) {
             if (e === p || e.dead) continue;
