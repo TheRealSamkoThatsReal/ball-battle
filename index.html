@@ -305,7 +305,7 @@
   // effective (base stat + synergy bonus)
   const effDmg    = b => b.dmgMult   * b.bonus.dmgMult * (b.abDmgMul||1);
   const effArmor  = b => b.armor     + b.bonus.armor;
-  const effLife   = b => b.lifesteal + b.bonus.lifesteal + (b.abLifesteal||0);
+  const effLife   = b => Math.min(0.6, b.lifesteal + b.bonus.lifesteal + (b.abLifesteal||0));   // capped so you can't out-heal everything
   const effThorns = b => b.thorns    + b.bonus.thorns;
   const effParry  = b => Math.min(0.95, b.parry + b.bonus.parry + (b.abParry||0));   // capped so nothing is untouchable
 
@@ -477,16 +477,22 @@
     if (round % 5 === 0) {
       // BOSS ROUND — one big armed enemy (tuned down; player is healed to full first)
       const boss = new Ball({
-        name:"BOSS", color:"#ff2e2e", maxHp: 28 + round*6, speed: 1.85 + round*0.04,
-        spinSpeed: 0.024 + round*0.0015, r: 40, type: "normal",
+        name:"BOSS", color:"#ff2e2e", maxHp: Math.round(20 + round*3 + round*round*1.0),  // ~60 @r5, ~150 @r10, ~290 @r15
+        speed: 1.85 + round*0.04, spinSpeed: 0.024 + round*0.0015, r: 40, type: "normal",
       });
-      ["hammer","sword"].forEach(k => boss.addWeapon(k));   // fewer weapons = fewer big hits
-      boss.dmgMult = 1 + round*0.02; boss.isBoss = true;
+      const bw = ["hammer","sword"];
+      if (round >= 8)  bw.push("flail");
+      if (round >= 12) bw.push("lance");
+      bw.forEach(k => boss.addWeapon(k));
+      const bl = 1 + Math.floor(round/6);                  // boss weapons level up over time
+      boss.weapons.forEach(w => { w.level = bl; if (w.level >= EVOLVE_LEVEL) w.evolved = true; });
+      boss.dmgMult = 1 + round*0.02 + round*round*0.004;   // ~1.2 @r5, ~1.6 @r10, ~2.2 @r15
+      boss.isBoss = true;
       balls.push(boss);
       killFeed.unshift({ text:`⚠ ROUND ${round}: BOSS`, life: 1.6 });
     } else {
       const enemyCount = 1 + Math.floor((round-1)/2);            // 1,1,2,2,3,3...
-      const enemyHp = 12 + round*4;
+      const enemyHp = Math.round(12 + round*4 + round*round*0.5); // quadratic so late rounds keep up
       const enemyWeaponCount = Math.max(0, Math.floor((round-2)/2)); // weapons from round ~3
       const palette = ["#ff5a5a","#ff8a3d","#c264ff","#3de0c0","#ff5ba6","#7be05b"];
       for (let i=0;i<enemyCount;i++) {
@@ -502,7 +508,10 @@
           maxHp: enemyHp, speed: 2.6 + round*0.12, spinSpeed: 0.03 + round*0.004,
           r: 22 + Math.min(round,6), weapons: wk,
         });
-        e.dmgMult = 1 + round*0.05;
+        e.dmgMult = 1 + round*0.05 + round*round*0.004;   // damage ramps up late
+        // give tougher enemies leveled weapons so their hits scale too
+        const ewl = 1 + Math.floor(round/7);
+        if (ewl > 1) e.weapons.forEach(w => { w.level = ewl; });
         // elite: a beefy mini-boss with an extra weapon (non-boss rounds)
         if (round >= 4 && Math.random() < 0.16) {
           e.isElite = true; e.maxHp = Math.ceil(e.maxHp*2.2); e.hp = e.maxHp;
@@ -678,7 +687,8 @@
       spawnParticles(hx, hy, "#7fd0ff", 8, 5); floatText(hx, hy, "BLOCK", "#7fd0ff"); ting();
       return;
     }
-    const real = Math.max(1, dmg - effArmor(target));
+    // armor can reduce a hit by at most ~85%, so it can't make you immune to big hits
+    const real = Math.max(Math.max(1, Math.ceil(dmg*0.15)), dmg - effArmor(target));
     target.hp -= real;
     target.hitFlash = 1;
     // knockback
