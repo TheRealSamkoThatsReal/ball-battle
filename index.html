@@ -41,6 +41,8 @@
   .card .cname { font-size: 17px; font-weight: 700; margin: 8px 0 4px; }
   .card .cdesc { font-size: 12px; color: #9aa4bc; line-height: 1.45; }
   .card.small { width: 150px; padding: 14px; }
+  .card .cability { margin-top: 8px; max-height: 0; opacity: 0; overflow: hidden; font-size: 11px; color: #ffce6b; line-height: 1.4; transition: max-height .2s ease, opacity .2s ease, padding-top .2s ease; border-top: 1px solid transparent; }
+  .card:hover .cability { max-height: 80px; opacity: 1; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.1); }
   .wchip.syn { background: rgba(91,224,138,.12); border-color: #2f5f43; color: #9be0b0; cursor: help; }
   .card { position: relative; }
   .card .price { margin-top: 10px; font-weight: 800; color: #ffd24a; font-size: 15px; }
@@ -1106,6 +1108,7 @@
       c.className = "card small" + (unlocked ? "" : (meta.cores >= cl.unlockCost ? "" : " tooexp"));
       c.innerHTML = `<div class="icon">${cl.icon}</div><div class="cname">${cl.name}</div>`
         + `<div class="cdesc">${cl.desc}</div>`
+        + `<div class="cability">✦ <b>${cl.ability.name}</b><br>${cl.ability.desc}</div>`
         + (unlocked ? "" : `<div class="price">🔒 ${cl.unlockCost}⬡</div>`);
       c.onclick = () => {
         if (!unlocked) {
