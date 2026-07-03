@@ -166,7 +166,7 @@
     [1, 1.5, 2.13, 2.9].forEach((mult, i) => {
       const o = ac.createOscillator(), g = ac.createGain();
       o.type = "triangle"; o.frequency.value = base*mult;
-      const gain = 0.34 / (i+1);
+      const gain = 0.17 / (i+1);   // half volume
       g.gain.setValueAtTime(gain, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
       o.connect(g); g.connect(ac.destination);
@@ -236,7 +236,7 @@
       apply:p=>{ p.addWeapon("sword"); p.maxHp+=8; p.armor+=1; p.parry+=0.15; } },
     { id:"berserker", name:"Berserker", icon:"🩸", unlockCost:0, desc:"Twin daggers & lifesteal, but fragile.",
       ability:{ name:"Frenzy", icon:"🩸", cd:480, desc:"Spin, damage & lifesteal surge for ~3s." },
-      apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=4; } },
+      apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=2; } },
     { id:"juggernaut", name:"Juggernaut", icon:"🔨", unlockCost:15, desc:"Hammer bruiser. Big & tanky, slow spin.",
       ability:{ name:"Overdrive", icon:"🔨", cd:540, desc:"Spin up until you strike an enemy — the longer the charge, the bigger the slam." },
       apply:p=>{ p.addWeapon("hammer"); p.maxHp+=14; p.thorns+=2; p.spinSpeed*=0.7; p.r+=4; } },
@@ -244,7 +244,7 @@
       ability:{ name:"Cyclone", icon:"🌀", cd:480, desc:"Whirl at huge spin speed for ~3s." },
       apply:p=>{ p.addWeapon("spike"); p.addWeapon("spike"); p.spinSpeed*=1.6; p.baseSpeed*=1.1; p.r-=3; } },
     { id:"lancer", name:"Lancer", icon:"🏹", unlockCost:25, desc:"Long lance & extra speed. Strike first.",
-      ability:{ name:"Charge", icon:"🏹", cd:420, desc:"Dash at high speed, dealing heavy damage." },
+      ability:{ name:"Charge", icon:"🏹", cd:360, desc:"Dash at high speed, dealing heavy damage." },
       apply:p=>{ p.addWeapon("lance"); p.baseSpeed*=1.2; p.dmgMult*=1.1; } },
   ];
 
@@ -545,7 +545,7 @@
   }
 
   // ---------- shop ----------
-  function itemPrice(rw) { return (rw.type==="weapon" ? 8 : 5) + Math.floor(round/3); }
+  function itemPrice(rw) { return (rw.type==="weapon" ? 8 : 5) + Math.floor(round/2); }
   function rollShopItems(n) {
     const pool = REWARDS.filter(rw => !banished.has(rw.name));
     const out = [], copy = [...pool];
@@ -807,9 +807,9 @@
         break;
       }
       case "lancer": {                     // Charge: high-speed damaging dash
-        p.dashFrames = 2; p.abDmgMul = 2.2;   // keep dash speed alive while charging
+        p.dashFrames = 2; p.abDmgMul = 2.8;   // keep dash speed alive while charging
         if (st.t % 2 === 0) spawnParticles(p.x, p.y, "#f0e8c8", 3, 4);
-        if (st.t >= 26) st.active = false;
+        if (st.t >= 48) st.active = false;
         break;
       }
     }
