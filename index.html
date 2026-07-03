@@ -554,6 +554,10 @@
     return out;
   }
   function openShop() {
+    // cancel any in-progress ability so it doesn't linger into the shop / next round
+    if (player.abilityState) player.abilityState.active = false;
+    player.abSpinMul = 1; player.abDmgMul = 1; player.abParry = 0;
+    player.abLifesteal = 0; player.abInvuln = false; player.abGlow = 0;
     state = "shop";
     rerollCost = 3;
     shopItems = rollShopItems(4 + (meta.upgrades.slots||0));
