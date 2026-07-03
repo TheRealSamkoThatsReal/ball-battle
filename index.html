@@ -394,8 +394,8 @@
     if (killFeed.length > 4) killFeed.pop();
   }
   function goldFor(b) {
-    if (b.split) return 1;
-    let g = 2 + Math.floor(round/2);
+    if (b.split) return 2;
+    let g = 3 + round;                 // more generous so a fresh run can actually build up
     if (b.isElite) g += 8;
     if (b.isBoss) g += 25;
     return g;
@@ -443,12 +443,12 @@
   // ---------- run flow ----------
   function startRun(cls) {
     round = 0; runKills = 0; killFeed = []; floats = []; particles = []; hitstop = 0;
-    gold = 0; banished = new Set(); rerollCost = 3;
+    gold = 3; banished = new Set(); rerollCost = 3;   // small starting stipend
     player = new Ball({ isPlayer:true, name:"YOU", color:"#ffd24a", maxHp:20, speed:3.2, spinSpeed:0.04, r:26 });
     player.className = cls.name;
     cls.apply(player);
     applyMeta(player);                          // permanent upgrades
-    gold = (meta.upgrades.fortune||0) * 5;      // Fortune: starting gold
+    gold = 3 + (meta.upgrades.fortune||0) * 5;  // base stipend + Fortune bonus
     player.hp = player.maxHp;
     computeBonus(player);
     nextRound();
@@ -461,11 +461,11 @@
     if (round % 5 === 0) {
       // BOSS ROUND — one big armed enemy (tuned down; player is healed to full first)
       const boss = new Ball({
-        name:"BOSS", color:"#ff2e2e", maxHp: 38 + round*8, speed: 1.9 + round*0.05,
-        spinSpeed: 0.026 + round*0.0015, r: 40, type: "normal",
+        name:"BOSS", color:"#ff2e2e", maxHp: 28 + round*6, speed: 1.85 + round*0.04,
+        spinSpeed: 0.024 + round*0.0015, r: 40, type: "normal",
       });
-      ["hammer","flail","sword"].forEach(k => boss.addWeapon(k));
-      boss.dmgMult = 1 + round*0.035; boss.isBoss = true;
+      ["hammer","sword"].forEach(k => boss.addWeapon(k));   // fewer weapons = fewer big hits
+      boss.dmgMult = 1 + round*0.02; boss.isBoss = true;
       balls.push(boss);
       killFeed.unshift({ text:`⚠ ROUND ${round}: BOSS`, life: 1.6 });
     } else {
@@ -520,7 +520,7 @@
   }
 
   // ---------- shop ----------
-  function itemPrice(rw) { return (rw.type==="weapon" ? 9 : 6) + Math.floor(round/3); }
+  function itemPrice(rw) { return (rw.type==="weapon" ? 8 : 5) + Math.floor(round/3); }
   function rollShopItems(n) {
     const pool = REWARDS.filter(rw => !banished.has(rw.name));
     const out = [], copy = [...pool];
