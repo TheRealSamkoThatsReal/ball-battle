@@ -122,11 +122,14 @@
       <div class="sub" style="margin-bottom:6px">Synergies <span style="opacity:.6">(hover for effect)</span></div>
       <div class="wlist" id="synergies"><span class="sub">none active</span></div>
     </div>
-    <div style="margin-top:auto; display:flex; gap:8px; flex-wrap:wrap">
-      <button id="soundBtn" class="ghost" style="flex:1">🔊 Sound: On</button>
-      <button id="controlBtn" class="ghost" style="flex:1">🕹️ Control: Off</button>
+    <div style="margin-top:auto; display:flex; flex-direction:column; gap:8px">
+      <button id="abilityBtn">✦ Ability</button>
+      <div style="display:flex; gap:8px">
+        <button id="soundBtn" class="ghost" style="flex:1">🔊 Sound: On</button>
+        <button id="controlBtn" class="ghost" style="flex:1">🕹️ Control: Off</button>
+      </div>
     </div>
-    <div class="hint">Free-for-all — enemies hurt each other too. Clear the arena to survive the round.</div>
+    <div class="hint">Press <b>Space</b> for your class ability. In Control mode: mouse steers, <b>Shift</b> dashes.</div>
   </div>
 </div>
 
@@ -227,14 +230,19 @@
   // ---------- classes (chosen at run start) ----------
   const CLASSES = [
     { id:"knight", name:"Knight", icon:"🛡️", unlockCost:0, desc:"Sturdy all-rounder. Sword, +8 HP, armor & parry.",
+      ability:{ name:"Bulwark", icon:"🛡️", cd:480, desc:"Become invulnerable for ~2s." },
       apply:p=>{ p.addWeapon("sword"); p.maxHp+=8; p.armor+=1; p.parry+=0.15; } },
     { id:"berserker", name:"Berserker", icon:"🩸", unlockCost:0, desc:"Twin daggers & lifesteal, but fragile.",
+      ability:{ name:"Frenzy", icon:"🩸", cd:480, desc:"Spin, damage & lifesteal surge for ~3s." },
       apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=4; } },
     { id:"juggernaut", name:"Juggernaut", icon:"🔨", unlockCost:15, desc:"Hammer bruiser. Big & tanky, slow spin.",
+      ability:{ name:"Overdrive", icon:"🔨", cd:540, desc:"Charge up spin, then unleash a massive slam." },
       apply:p=>{ p.addWeapon("hammer"); p.maxHp+=14; p.thorns+=2; p.spinSpeed*=0.7; p.r+=4; } },
     { id:"whirlwind", name:"Whirlwind", icon:"🌀", unlockCost:20, desc:"Twin spikes, blazing spin, small & quick.",
+      ability:{ name:"Cyclone", icon:"🌀", cd:480, desc:"Whirl at huge spin speed for ~3s." },
       apply:p=>{ p.addWeapon("spike"); p.addWeapon("spike"); p.spinSpeed*=1.6; p.baseSpeed*=1.1; p.r-=3; } },
     { id:"lancer", name:"Lancer", icon:"🏹", unlockCost:25, desc:"Long lance & extra speed. Strike first.",
+      ability:{ name:"Charge", icon:"🏹", cd:420, desc:"Dash at high speed, dealing heavy damage." },
       apply:p=>{ p.addWeapon("lance"); p.baseSpeed*=1.2; p.dmgMult*=1.1; } },
   ];
 
@@ -293,11 +301,11 @@
     p.bonus = b; p.activeSynergies = active;
   }
   // effective (base stat + synergy bonus)
-  const effDmg    = b => b.dmgMult   * b.bonus.dmgMult;
+  const effDmg    = b => b.dmgMult   * b.bonus.dmgMult * (b.abDmgMul||1);
   const effArmor  = b => b.armor     + b.bonus.armor;
-  const effLife   = b => b.lifesteal + b.bonus.lifesteal;
+  const effLife   = b => b.lifesteal + b.bonus.lifesteal + (b.abLifesteal||0);
   const effThorns = b => b.thorns    + b.bonus.thorns;
-  const effParry  = b => Math.min(0.75, b.parry + b.bonus.parry);   // capped so nothing is untouchable
+  const effParry  = b => Math.min(0.95, b.parry + b.bonus.parry + (b.abParry||0));   // capped so nothing is untouchable
 
   // ---------- enemy affixes (random modifiers) ----------
   const AFFIXES = [
@@ -338,6 +346,10 @@
       this.isElite = false; this.affix = null; this.affixColor = null;
       this.regen = false; this.explosive = false;
       this.dashFrames = 0; this.dashCd = 0;   // player control: dash
+      // class ability (player-only)
+      this.abilityId = null; this.ability = null; this.abilityCd = 0; this.abilityState = null;
+      this.abSpinMul = 1; this.abDmgMul = 1; this.abParry = 0; this.abLifesteal = 0;
+      this.abInvuln = false; this.abGlow = 0;
       const ang = rand(0, Math.PI*2), dist = rand(0, ARENA_R*0.55);
       this.x = opts.x ?? CX + Math.cos(ang)*dist;
       this.y = opts.y ?? CY + Math.sin(ang)*dist;
@@ -418,7 +430,7 @@
       spawnParticles(b.x, b.y, "#ff7a2b", 30, 10);
       shake = Math.min(shake+8, 24);
       for (const o of balls) {
-        if (o === b || o.dead) continue;
+        if (o === b || o.dead || o.abInvuln) continue;
         const dx=o.x-b.x, dy=o.y-b.y, dd=Math.hypot(dx,dy)||1;
         if (dd < b.r + o.r + 45) {
           const real = Math.max(1, 6 - effArmor(o));
@@ -446,6 +458,8 @@
     gold = 3; banished = new Set(); rerollCost = 3;   // small starting stipend
     player = new Ball({ isPlayer:true, name:"YOU", color:"#ffd24a", maxHp:20, speed:3.2, spinSpeed:0.04, r:26 });
     player.className = cls.name;
+    player.abilityId = cls.id; player.ability = cls.ability;
+    player.abilityCd = 0; player.abilityState = { active:false };
     cls.apply(player);
     applyMeta(player);                          // permanent upgrades
     gold = 3 + (meta.upgrades.fortune||0) * 5;  // base stipend + Fortune bonus
@@ -658,6 +672,10 @@
   }
 
   function applyDamage(attacker, target, dmg, hx, hy, dirx, diry, knock) {
+    if (target.abInvuln) {   // Knight's Bulwark: fully block
+      spawnParticles(hx, hy, "#7fd0ff", 8, 5); floatText(hx, hy, "BLOCK", "#7fd0ff"); ting();
+      return;
+    }
     const real = Math.max(1, dmg - effArmor(target));
     target.hp -= real;
     target.hitFlash = 1;
@@ -673,6 +691,7 @@
   }
   // damage-over-time and other non-attributed damage (no lifesteal/knockback)
   function tickDamage(target, dmg, color) {
+    if (target.abInvuln) return;
     target.hp -= dmg; target.hitFlash = 0.6;
     spawnParticles(target.x, target.y, color, 4, 3);
     floatDmg(target.x, target.y, dmg, color);
@@ -706,9 +725,77 @@
     }
   }
 
+  // ---------- class abilities ----------
+  function activateAbility() {
+    const p = player;
+    if (!p || p.dead || state !== "fighting" || !p.ability) return;
+    if (p.abilityCd > 0 || (p.abilityState && p.abilityState.active)) return;
+    p.abilityState = { active:true, phase:"main", t:0 };
+    p.abilityCd = p.ability.cd;
+    p.abGlow = 1;
+    beep(300, 0.12, "sawtooth", 0.14);
+  }
+  function updateAbility(p) {
+    if (p.abilityCd > 0) p.abilityCd--;
+    // transient effects are recomputed fresh each frame
+    p.abSpinMul = 1; p.abDmgMul = 1; p.abParry = 0; p.abLifesteal = 0; p.abInvuln = false;
+    if (p.abGlow > 0) p.abGlow -= 0.04;
+    const st = p.abilityState;
+    if (!st || !st.active) return;
+    st.t++;
+    p.abGlow = 1;
+    switch (p.abilityId) {
+      case "juggernaut": {                 // Overdrive: wind up spin, then SLAM
+        const CHARGE = 80;
+        if (st.phase === "main") {
+          p.abSpinMul = 1 + 6 * (st.t / CHARGE);          // ramp to ~7x spin
+          if (st.t % 4 === 0) spawnParticles(p.x, p.y, "#ffb03d", 5, 4);
+          if (st.t >= CHARGE) st.phase = "slam";
+        } else {                                           // release
+          const R = p.r + 140, dmg = (28 + round*3) * effDmg(p);
+          for (const e of balls) {
+            if (e === p || e.dead) continue;
+            const dx=e.x-p.x, dy=e.y-p.y, d=Math.hypot(dx,dy)||1;
+            if (d < R + e.r) applyDamage(p, e, dmg, e.x, e.y, dx/d, dy/d, 9);
+          }
+          spawnParticles(p.x, p.y, "#ffce6b", 50, 12);
+          shake = Math.min(shake + 26, 30); hitstop = Math.max(hitstop, 8);
+          beep(80, 0.4, "sawtooth", 0.2); floatText(p.x, p.y - p.r - 8, "SLAM!", "#ffce6b");
+          st.active = false;
+        }
+        break;
+      }
+      case "knight": {                     // Bulwark: brief invulnerability
+        p.abInvuln = true;
+        if (st.t % 6 === 0) spawnParticles(p.x, p.y, "#7fd0ff", 4, 3);
+        if (st.t >= 130) st.active = false;
+        break;
+      }
+      case "berserker": {                  // Frenzy: all-out aggression
+        p.abSpinMul = 2.2; p.abDmgMul = 1.5; p.abLifesteal = 0.3;
+        if (st.t % 5 === 0) spawnParticles(p.x, p.y, "#ff4d6a", 3, 3);
+        if (st.t >= 200) st.active = false;
+        break;
+      }
+      case "whirlwind": {                  // Cyclone: blistering spin
+        p.abSpinMul = 4; p.abDmgMul = 1.2;
+        if (st.t % 4 === 0) spawnParticles(p.x, p.y, "#5bd0ff", 3, 4);
+        if (st.t >= 200) st.active = false;
+        break;
+      }
+      case "lancer": {                     // Charge: high-speed damaging dash
+        p.dashFrames = 2; p.abDmgMul = 2.2;   // keep dash speed alive while charging
+        if (st.t % 2 === 0) spawnParticles(p.x, p.y, "#f0e8c8", 3, 4);
+        if (st.t >= 26) st.active = false;
+        break;
+      }
+    }
+  }
+
   // ---------- simulation ----------
   function step() {
     computeBonus(player);   // synergies re-evaluated live (some depend on current HP/speed)
+    updateAbility(player);  // class ability effects (cooldown, buffs, slam)
     // shrinking arena: after ~7s of a round it squeezes inward to force a finish
     roundFrame++;
     if (roundFrame > 420) arenaR = Math.max(arenaR - 0.35, ARENA_R * 0.55);
@@ -718,7 +805,7 @@
       const frost = b.status.frost > 0 ? 0.5 : 1;
       if (b.status.frost > 0) b.status.frost--;
       if (b.status.burn > 0) { b.status.burn--; if (b.status.burn % 20 === 0) tickDamage(b, 1, "#ff7a2b"); if (b.dead) continue; }
-      b.spin += b.spinSpeed * b.bonus.spinMult * frost;
+      b.spin += b.spinSpeed * b.bonus.spinMult * frost * (b.abSpinMul||1);
       b.x += b.vx; b.y += b.vy;
       if (b.hitFlash > 0) b.hitFlash -= 0.08;
       if (b.parryFlash > 0) b.parryFlash -= 0.06;
@@ -906,6 +993,12 @@
       for (const w of b.weapons) drawWeapon(b,w);
       // body
       ctx.fillStyle=b.color; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill();
+      // ability aura
+      if (b.abGlow > 0) {
+        ctx.globalAlpha = Math.min(1, b.abGlow) * 0.85; ctx.strokeStyle = b.abInvuln ? "#7fd0ff" : "#fff2b0";
+        ctx.lineWidth = 4 + b.abGlow*5;
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r+5, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
       // status tint overlays
       if (b.status.burn>0){ ctx.globalAlpha=0.35; ctx.fillStyle="#ff7a2b";
         ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; }
@@ -969,6 +1062,15 @@
     el('sLifesteal').textContent = Math.round(effLife(player)*100)+"%";
     el('sThorns').textContent = effThorns(player);
     el('sParry').textContent = Math.round(effParry(player)*100)+"%";
+    const abBtn = el('abilityBtn');
+    if (player.ability) {
+      const busy = player.abilityState && player.abilityState.active;
+      const ready = player.abilityCd <= 0 && !busy;
+      abBtn.textContent = `${player.ability.icon} ${player.ability.name} — ` +
+        (busy ? "ACTIVE" : ready ? "READY" : (player.abilityCd/60).toFixed(1)+"s");
+      abBtn.style.opacity = ready ? "1" : "0.55";
+      abBtn.title = player.ability.desc;
+    }
     const syn = el('synergies');
     if (!player.activeSynergies.length) syn.innerHTML = '<span class="sub">none active</span>';
     else syn.innerHTML = player.activeSynergies.map(s =>
@@ -1054,19 +1156,22 @@
   el('continueBtn').onclick = () => { if (state==="shop") nextRound(); };
   el('upgradesBtn').onclick = () => { renderMeta(); ui.meta.classList.add('show'); };
   el('metaBackBtn').onclick = () => { ui.meta.classList.remove('show'); updateStartCores(); renderClassCards(); };
+  el('abilityBtn').onclick = activateAbility;
 
-  // player-control input
+  // player input
   canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();
     mouseX = (e.clientX - r.left) / r.width * W;
     mouseY = (e.clientY - r.top)  / r.height * H;
   });
   window.addEventListener('keydown', e => {
-    if (e.code === "Space" && controlOn && player && !player.dead && state === "fighting" && player.dashCd <= 0) {
-      player.dashFrames = 10; player.dashCd = 75;
+    if (state !== "fighting" || !player || player.dead) return;
+    if (e.code === "Space") {                              // class ability
+      activateAbility(); e.preventDefault();
+    } else if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && controlOn && player.dashCd <= 0) {
+      player.dashFrames = 10; player.dashCd = 75;          // control-mode dash
       spawnParticles(player.x, player.y, player.color, 10, 6);
       beep(500, 0.08, "sawtooth", 0.1);
-      e.preventDefault();
     }
   });
 
