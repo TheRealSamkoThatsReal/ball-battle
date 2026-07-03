@@ -238,7 +238,7 @@
       ability:{ name:"Frenzy", icon:"🩸", cd:480, desc:"Spin, damage & lifesteal surge for ~3s." },
       apply:p=>{ p.addWeapon("dagger"); p.addWeapon("dagger"); p.lifesteal+=0.15; p.maxHp-=4; } },
     { id:"juggernaut", name:"Juggernaut", icon:"🔨", unlockCost:15, desc:"Hammer bruiser. Big & tanky, slow spin.",
-      ability:{ name:"Overdrive", icon:"🔨", cd:540, desc:"Charge up spin, then unleash a massive slam." },
+      ability:{ name:"Overdrive", icon:"🔨", cd:540, desc:"Spin up until you strike an enemy — the longer the charge, the bigger the slam." },
       apply:p=>{ p.addWeapon("hammer"); p.maxHp+=14; p.thorns+=2; p.spinSpeed*=0.7; p.r+=4; } },
     { id:"whirlwind", name:"Whirlwind", icon:"🌀", unlockCost:20, desc:"Twin spikes, blazing spin, small & quick.",
       ability:{ name:"Cyclone", icon:"🌀", cd:480, desc:"Whirl at huge spin speed for ~3s." },
@@ -747,14 +747,21 @@
     st.t++;
     p.abGlow = 1;
     switch (p.abilityId) {
-      case "juggernaut": {                 // Overdrive: wind up spin, then SLAM
-        const CHARGE = 80;
+      case "juggernaut": {                 // Overdrive: wind up spin, hold until you hit something, then SLAM
         if (st.phase === "main") {
-          p.abSpinMul = 1 + 6 * (st.t / CHARGE);          // ramp to ~7x spin
+          p.abSpinMul = 1 + Math.min(st.t * 0.09, 8);     // keep gaining spin, cap ~9x
           if (st.t % 4 === 0) spawnParticles(p.x, p.y, "#ffb03d", 5, 4);
-          if (st.t >= CHARGE) st.phase = "slam";
-        } else {                                           // release
-          const R = p.r + 140, dmg = (28 + round*3) * effDmg(p);
+          // release the moment we make contact with an enemy (fallback after ~10s)
+          let target = null;
+          for (const e of balls) {
+            if (e === p || e.dead) continue;
+            const dx=e.x-p.x, dy=e.y-p.y;
+            if (Math.hypot(dx,dy) < p.r + e.r + 6) { target = e; break; }
+          }
+          if (target || st.t > 600) { st.phase = "slam"; st.charge = st.t; }
+        } else {                                           // release — bigger the longer you charged
+          const R = p.r + 140, chargeMul = 1 + Math.min((st.charge||0)/120, 1.5);
+          const dmg = (28 + round*3) * effDmg(p) * chargeMul;
           for (const e of balls) {
             if (e === p || e.dead) continue;
             const dx=e.x-p.x, dy=e.y-p.y, d=Math.hypot(dx,dy)||1;
